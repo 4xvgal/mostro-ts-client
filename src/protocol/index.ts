@@ -226,3 +226,14 @@ export type { OrderEvent, OrdersFilter } from "./orderbook.js";
 
 export { applyTradeDm } from "./applicator.js";
 export type { AppliedDmResult } from "./applicator.js";
+
+export {
+  classifyInvoice,
+  isProbablyValidBolt11,
+  invoiceExpired,
+  invoicePayload,
+  buildInvoiceMessage,
+  handleAddInvoiceResponse,
+  handleAddBondInvoiceResponse,
+} from "./invoice.js";
+export type { InvoiceKind } from "./invoice.js";

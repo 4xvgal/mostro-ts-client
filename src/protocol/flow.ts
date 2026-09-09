@@ -268,6 +268,18 @@ export function handleTakeOrderResponse(
       const reason = kind.payload && kind.payload.variant === "cant_do" ? kind.payload.value : null;
       throw new CantDoError(reason, kind.request_id);
     }
+    case "add-invoice": {
+      // Take-sell without a buyer invoice: Mostro asks for the payout bolt11.
+      const payload = kind.payload;
+      if (!payload || payload.variant !== "order") {
+        throw new Error("Mostro replied with AddInvoice but no order payload");
+      }
+      return {
+        type: "add-invoice",
+        order: payload.value,
+        requestId: kind.request_id,
+      };
+    }
     default:
       throw new Error(`Unexpected action: ${kind.action}`);
   }
@@ -275,7 +287,8 @@ export function handleTakeOrderResponse(
 
 export type TakeOrderResponse =
   | { type: "hold-invoice"; order: SmallOrder | null; invoice: string; amount: number | null; requestId: number }
-  | { type: "bond-invoice"; order: SmallOrder | null; invoice: string; amount: number | null; requestId: number };
+  | { type: "bond-invoice"; order: SmallOrder | null; invoice: string; amount: number | null; requestId: number }
+  | { type: "add-invoice"; order: SmallOrder; requestId: number };
 
 /** Structured refusal from Mostro (`Payload::CantDo`). */
 export class CantDoError extends Error {
