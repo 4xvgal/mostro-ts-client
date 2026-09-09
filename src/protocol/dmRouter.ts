@@ -103,6 +103,12 @@ export interface DmRouterOptions {
   initialTrades?: Map<string, string>;
   /** Callback for tracked-order DMs (after waiter consumption). */
   onOrderMessage?: (orderId: string, message: Message, event: NostrEvent) => void;
+  /**
+   * Raw inbound DM callback for every decrypted protocol DM (including ones
+   * that also satisfy a waiter). Use for message-history UIs (Messages tab);
+   * distinct from onOrderMessage which fires for tracked orders only.
+   */
+  onMessage?: (orderId: string | null, message: Message, event: NostrEvent) => void;
 }
 
 /**
@@ -119,6 +125,7 @@ export class DmRouter {
   private mostroPubkeyHex: string;
   private transport: Transport;
   private onOrderMessage?: (orderId: string, message: Message, event: NostrEvent) => void;
+  private onMessage?: (orderId: string | null, message: Message, event: NostrEvent) => void;
 
   private waiters: PendingWaiter[] = [];
   private subscribedSecrets = new Set<string>();
@@ -135,6 +142,7 @@ export class DmRouter {
     this.mostroPubkeyHex = opts.mostroPubkeyHex;
     this.transport = opts.transport;
     this.onOrderMessage = opts.onOrderMessage;
+    this.onMessage = opts.onMessage;
     for (const [orderId, secret] of opts.initialTrades ?? []) {
       this.ensureSubscription(orderId, secret);
     }
@@ -201,7 +209,7 @@ export class DmRouter {
     if (this.ownOutboundIds.has(event.id)) {
       return;
     }
-    // Consume waiters first.
+    // Consume waiters first (a waiter DM can also be a tracked-order DM).
     const remaining: PendingWaiter[] = [];
     for (const waiter of this.waiters) {
       if (waiter.closed()) {
@@ -216,11 +224,22 @@ export class DmRouter {
     }
     this.waiters = remaining;
 
-    // Route tracked-order DMs (if the event decrypts with a tracked key).
-    if (this.onOrderMessage) {
-      const routed = this.routeTracked(event);
-      if (routed) {
-        this.onOrderMessage(routed.orderId, routed.message, event);
+    // Route tracked-order DMs.
+    const routed = this.routeTracked(event);
+    if (routed) {
+      this.onOrderMessage?.(routed.orderId, routed.message, event);
+      this.onMessage?.(routed.orderId, routed.message, event);
+      return;
+    }
+    // Untracked inbound DM: fire onMessage with orderId null (message-history
+    // UIs can still render it); only if it decrypts with any known key.
+    if (this.onMessage) {
+      for (const { orderId, tradeSecretHex } of this.orderBySubscription.values()) {
+        const unwrapped = tryUnwrap(event, tradeSecretHex);
+        if (unwrapped !== null) {
+          this.onMessage(orderId, unwrapped.message, event);
+          return;
+        }
       }
     }
   }

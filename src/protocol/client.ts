@@ -88,6 +88,10 @@ export class MostroClient {
   private trades = new Map<string, string>();
   /** Optional reactive sink (React store) the client pushes into. */
   private sink: ClientStoreSink | null = null;
+  /** order_id → inbound DM history (for Messages-style UIs). */
+  private messageHistory = new Map<string, Array<{ timestamp: number; message: Message }>>();
+  /** order_id → callback when a new DM arrives for that order. */
+  private messageHandlers = new Map<string, (dm: { timestamp: number; message: Message }) => void>();
 
   // Identity/trade keys derived from the mnemonic.
   private identitySecret: string;
@@ -140,6 +144,7 @@ export class MostroClient {
       mostroPubkeyHex: this.opts.mostroPubkey,
       transport: info.protocol_version === 2 ? "nip44" : "gift-wrap",
       onOrderMessage: (orderId, message, event) => this.handleInboundDm(orderId, message),
+      onMessage: (orderId, message, event) => this.recordMessage(orderId, message, event.created_at),
     });
 
     // Restore in-flight orders from the store so DMs route correctly.
@@ -177,6 +182,38 @@ export class MostroClient {
   /** Subscribe to trade-state updates for an order. */
   onTrade(orderId: string, handler: TradeHandler): void {
     this.tradeHandlers.set(orderId, handler);
+  }
+
+  /**
+   * Subscribe to per-order inbound DMs (Messages tab). The handler fires for
+   * every new protocol DM routed to this order; history is also retained so a
+   * fresh tab can render the full timeline.
+   */
+  onMessage(orderId: string, handler: (dm: { timestamp: number; message: Message }) => void): void {
+    this.messageHandlers.set(orderId, handler);
+  }
+
+  /** The inbound DM timeline for an order (chronological). */
+  getMessages(orderId: string): Array<{ timestamp: number; message: Message }> {
+    return this.messageHistory.get(orderId) ?? [];
+  }
+
+  private recordMessage(orderId: string | null, message: Message, timestamp: number): void {
+    if (!orderId) {
+      return;
+    }
+    const list = this.messageHistory.get(orderId) ?? [];
+    list.push({ timestamp, message });
+    this.messageHistory.set(orderId, list);
+    this.messageHandlers.get(orderId)?.({
+      timestamp,
+      message,
+    });
+  }
+
+  /** Register an event id we published (own outbound request). */
+  noteOutbound(eventId: string): void {
+    this.router?.noteOutbound(eventId);
   }
 
   /**
