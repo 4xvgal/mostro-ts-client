@@ -10,9 +10,10 @@ import {
   deriveTradeKeys,
   buildNewOrder,
   restoreSession,
-  openSqliteStore,
+  openNodeSqliteStore,
   generateMnemonic,
 } from "../src/protocol/index.js";
+import { openNodeSqliteStore } from "../src/protocol/node-store.js";
 import { sendDm, DmRouter } from "../src/protocol/dmRouter.js";
 import { unwrapMessageNip44 } from "../src/protocol/transport.js";
 import { infoFromRelay } from "./lib/relay.js";
@@ -48,7 +49,7 @@ async function main() {
   console.log("created order:", orderId?.slice(0, 8) ?? "?");
 
   // Now restore.
-  const store = openSqliteStore();
+  const store = openNodeSqliteStore();
   await store.upsertUser({
     i0_pubkey: identity.pubkey,
     mnemonic: MNEMONIC,

@@ -13,3 +13,5 @@ dist/
 
 # Regtest runtime artifacts (daemon DB, LND data)
 docker/regtest/config/mostro.db*
+# TUI runtime
+/tui/.mostro-tui.db*

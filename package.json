@@ -4,9 +4,12 @@
   "description": "",
   "main": "dist/index.js",
   "scripts": {
-    "test": "tsx --test test/*.test.ts",
+    "test": "npm run test:node",
     "typecheck": "tsc --noEmit",
-    "build": "tsc"
+    "build": "tsc",
+    "test:node": "tsx --test test/*.test.ts test/node/*.test.ts",
+    "test:bun": "bun test test/*.test.ts test/bun/*.test.ts",
+    "test:browser": "tsx --test test/*.test.ts test/browser/*.test.ts"
   },
   "keywords": [],
   "author": "",
@@ -17,6 +20,7 @@
     "@noble/curves": "^2.4.0",
     "@scure/bip32": "^2.4.0",
     "@types/node": "^26.5.0",
+    "better-sqlite3": "^13.0.3",
     "bip39": "^3.1.0",
     "nostr-tools": "^2.25.2",
     "tsx": "^4.23.13",
@@ -25,11 +29,33 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/blessed": "^0.1.27",
+    "@types/bun": "^1.4.2",
     "@types/react": "^19.2.18",
+    "blessed": "^0.1.81",
     "fake-indexeddb": "^6.2.5",
     "react": "^19.2.8"
   },
   "peerDependencies": {
     "react": "^18.0.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/protocol/index.d.ts",
+      "default": "./dist/protocol/index.js"
+    },
+    "./node": {
+      "types": "./dist/protocol/node-store.d.ts",
+      "default": "./dist/protocol/node-store.js"
+    },
+    "./bun": {
+      "types": "./dist/protocol/bun-store.d.ts",
+      "default": "./dist/protocol/bun-store.js"
+    },
+    "./browser": {
+      "types": "./dist/protocol/idb.d.ts",
+      "default": "./dist/protocol/idb.js"
+    }
   }
 }

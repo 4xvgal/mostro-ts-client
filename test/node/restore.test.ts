@@ -1,8 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { openSqliteStore, deriveTradeKeys } from "../src/protocol/index.js";
-import type { Store } from "../src/protocol/index.js";
+import { deriveTradeKeys } from "../../src/protocol/index.js";
+import { openNodeSqliteStore } from "../../src/protocol/node-store.js";
+import type { Store } from "../../src/protocol/index.js";
 
 const MNEMONIC =
   "leader monkey parrot ring guide accident before fence cannon height naive bean";
@@ -23,7 +24,7 @@ async function seedIdentity(store: Store) {
 // the same helpers restore uses. Full restore needs the daemon (E2E).
 
 test("restore advances last_trade_index to max(restore, mostro)", async () => {
-  const store = openSqliteStore();
+  const store = openNodeSqliteStore();
   const identity = await seedIdentity(store);
 
   // Simulate restore's index advance (effectiveLast = max(5, 7) = 7).
@@ -46,7 +47,7 @@ test("restore infers maker from pending/waiting-maker-bond status", () => {
 });
 
 test("restore persists minimal order row with re-derived trade key", async () => {
-  const store = openSqliteStore();
+  const store = openNodeSqliteStore();
   await seedIdentity(store);
 
   const tradeIndex = 2;
@@ -81,7 +82,7 @@ test("restore persists minimal order row with re-derived trade key", async () =>
 });
 
 test("restore marks disputed order + persists dispute id and solver chat", async () => {
-  const store = openSqliteStore();
+  const store = openNodeSqliteStore();
   await seedIdentity(store);
 
   const tradeIndex = 3;
@@ -112,7 +113,7 @@ test("restore marks disputed order + persists dispute id and solver chat", async
   await store.updateOrderStatus(idStr, "dispute");
   await store.updateDisputeId(idStr, "dispute-uuid-77");
   const solverPubkey = "f671551574daa8c6e5f35865a5596d131a0412f7d04bae0305538c8f46f90ed1";
-  const { deriveChatKeys } = await import("../src/protocol/chatKeys.js");
+  const { deriveChatKeys } = await import("../../src/protocol/chatKeys.js");
   const chat = deriveChatKeys(tradeKeys.secret, solverPubkey);
   await store.updateSolverChat(idStr, solverPubkey, chat.convSecretHex);
 

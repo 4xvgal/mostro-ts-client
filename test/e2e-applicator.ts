@@ -13,10 +13,11 @@ import {
   buildTradeMessage,
   buildTakeOrderPayload,
   takeActionForOrder,
-  openSqliteStore,
+  openNodeSqliteStore,
   applyTradeDm,
   getOrder,
 } from "../src/protocol/index.js";
+import { openNodeSqliteStore } from "../src/protocol/node-store.js";
 import { sendDm, DmRouter } from "../src/protocol/dmRouter.js";
 import { unwrapMessageNip44 } from "../src/protocol/transport.js";
 import { infoFromRelay } from "./lib/relay.js";
@@ -30,7 +31,7 @@ async function main() {
   const mostroPubkey = await infoFromRelay(pool, RELAY);
   if (!mostroPubkey) throw new Error("no mostro info event");
 
-  const store = openSqliteStore();
+  const store = openNodeSqliteStore();
 
   // Maker creates a sell order; persist the maker's trade secret.
   const makerMn = generateMnemonic();

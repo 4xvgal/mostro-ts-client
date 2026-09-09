@@ -1,8 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { openSqliteStore, applyTradeDm, TERMINAL_DM_STATUSES } from "../src/protocol/index.js";
-import type { Message, MessageKind, Store } from "../src/protocol/index.js";
+import { applyTradeDm, TERMINAL_DM_STATUSES } from "../../src/protocol/index.js";
+import { openNodeSqliteStore } from "../../src/protocol/node-store.js";
+import type { Message, MessageKind, Store } from "../../src/protocol/index.js";
 
 const UUID = "308e1272-d5f4-47e6-bd97-3504baea9c23";
 const TRADE_SECRET =
@@ -63,7 +64,7 @@ function orderPayload(overrides: Record<string, unknown> = {}) {
 }
 
 test("add-invoice upserts order with monotonic status", async () => {
-  const store = openSqliteStore();
+  const store = openNodeSqliteStore();
   const result = await applyTradeDm({
     store,
     orderId: UUID,
@@ -80,7 +81,7 @@ test("add-invoice upserts order with monotonic status", async () => {
 });
 
 test("backward status is rejected", async () => {
-  const store = openSqliteStore();
+  const store = openNodeSqliteStore();
   // Seed at success.
   await store.saveOrder({
     id: UUID,
@@ -115,7 +116,7 @@ test("backward status is rejected", async () => {
 });
 
 test("post-retry AddInvoice reopens success → settled-hold-invoice", async () => {
-  const store = openSqliteStore();
+  const store = openNodeSqliteStore();
   await store.saveOrder({
     id: UUID,
     kind: "sell",
@@ -146,7 +147,7 @@ test("post-retry AddInvoice reopens success → settled-hold-invoice", async () 
 });
 
 test("dispute-initiated-by-you persists dispute id", async () => {
-  const store = openSqliteStore();
+  const store = openNodeSqliteStore();
   await seedOrder(store);
   const result = await applyTradeDm({
     store,
@@ -162,7 +163,7 @@ test("dispute-initiated-by-you persists dispute id", async () => {
 });
 
 test("admin-took-dispute derives and persists solver chat key", async () => {
-  const store = openSqliteStore();
+  const store = openNodeSqliteStore();
   await seedOrder(store, "dispute");
 
   const solverPubkey = "f671551574daa8c6e5f35865a5596d131a0412f7d04bae0305538c8f46f90ed1";
@@ -184,7 +185,7 @@ test("admin-took-dispute derives and persists solver chat key", async () => {
 });
 
 test("cant-do never applies payload status", async () => {
-  const store = openSqliteStore();
+  const store = openNodeSqliteStore();
   const result = await applyTradeDm({
     store,
     orderId: UUID,

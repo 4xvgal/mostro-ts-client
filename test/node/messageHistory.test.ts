@@ -2,8 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { SimplePool } from "nostr-tools/pool";
-import { MostroClient, generateMnemonic, openSqliteStore } from "../src/protocol/index.js";
-import type { Message } from "../src/protocol/index.js";
+import { MostroClient, generateMnemonic } from "../../src/protocol/index.js";
+import { openNodeSqliteStore } from "../../src/protocol/node-store.js";
+import type { Message } from "../../src/protocol/index.js";
 
 const RELAY = "ws://localhost:7080";
 
@@ -27,7 +28,7 @@ test("onMessage records history per order", async () => {
     mnemonic: generateMnemonic(),
     mostroPubkey: "6c4b8b42b8bda8e59a155788271ba54febe8bd1dbf1319f3ff0a68d9770ecbbe",
     relays: [RELAY],
-    store: openSqliteStore(),
+    store: openNodeSqliteStore(),
   });
 
   await client.start();

@@ -10,7 +10,6 @@ import type { NostrEvent } from "nostr-tools/core";
 import type { Message, MessageKind } from "./message.js";
 import type { SmallOrder } from "./order.js";
 import { deriveIdentityKeys, deriveTradeKeys } from "./keys.js";
-import { openSqliteStore } from "./db.js";
 import type { Store, UserRow } from "./store.js";
 import { DmRouter, sendDm, FETCH_EVENTS_TIMEOUT_MS } from "./dmRouter.js";
 import { unwrapMessageNip44 } from "./transport.js";
@@ -30,8 +29,9 @@ export interface MostroClientOptions {
   mostroPubkey: string;
   /** Nostr relay URLs. */
   relays: string[];
-  /** Optional store; defaults to an in-memory SQLite store. */
-  store?: Store;
+  /** Persistence backend — inject openNodeSqliteStore / openBunSqliteStore /
+   * openIndexedDbStore. Required (no implicit runtime choice). */
+  store: Store;
   /** Fiat currency filter for the order book (empty = all). */
   currencies?: string[];
 }
@@ -101,7 +101,7 @@ export class MostroClient {
   constructor(opts: MostroClientOptions) {
     this.opts = opts;
     this.pool = new SimplePool();
-    this.store = opts.store ?? openSqliteStore();
+    this.store = opts.store;
     const identity = deriveIdentityKeys(opts.mnemonic);
     this.identitySecret = identity.secret;
     this.identityPubkey = identity.pubkey;
