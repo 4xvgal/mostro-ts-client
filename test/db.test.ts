@@ -42,7 +42,35 @@ test("users: upsert, get, atomic index reservation", async () => {
   assert.equal(second.nextIndex, 3);
 });
 
-test("orders: save, get, status update, active hydration", async () => {
+test("dispute id persistence", async () => {
+  const store = await freshStore();
+  const base = {
+    kind: "sell" as const,
+    status: "in-progress" as const,
+    amount: 100,
+    fiat_code: "USD",
+    min_amount: null,
+    max_amount: null,
+    fiat_amount: 50,
+    payment_method: "SEPA",
+    premium: 0,
+    trade_keys: "deadbeef",
+    counterparty_pubkey: null,
+    is_mine: true,
+    buyer_invoice: null,
+    request_id: 1,
+    trade_index: 2,
+    created_at: 100,
+    expires_at: 200,
+  };
+  await store.saveOrder({ ...base, id: "d-1" });
+  assert.equal((await store.getOrder("d-1"))?.dispute_id, null);
+
+  await store.updateDisputeId("d-1", "dispute-uuid-123");
+  assert.equal((await store.getOrder("d-1"))?.dispute_id, "dispute-uuid-123");
+});
+
+test("orders: upsert, get, status update, active hydration", async () => {
   const store = await freshStore();
   const base = {
     kind: "sell" as const,

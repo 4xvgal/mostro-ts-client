@@ -52,6 +52,12 @@ export {
   takeActionForOrder,
   handleNewOrderResponse,
   handleTakeOrderResponse,
+  buildRateUserMessage,
+  handleRateUserResponse,
+  computeNextTradePayload,
+  buildTradeCompletionMessage,
+  buildDisputeMessage,
+  handleDisputeNotification,
   CantDoError,
 } from "./flow.js";
 export type {
@@ -59,6 +65,7 @@ export type {
   NewOrderOutcome,
   NewOrderResponse,
   TakeOrderResponse,
+  DisputeNotification,
 } from "./flow.js";
 
 export { newSmallOrder, satsAmount, checkFiatAmount, checkAmount, checkZeroAmountWithPremium, checkRangeOrderLimits, checkFiatCurrency, isRangeOrder } from "./order.js";

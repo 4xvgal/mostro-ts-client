@@ -36,6 +36,8 @@ export interface OrderRow {
   created_at: number | null;
   expires_at: number | null;
   last_seen_dm_ts: number | null;
+  /** Dispute UUID assigned by Mostro for this order. */
+  dispute_id: string | null;
 }
 
 export interface AdminDisputeRow {
@@ -119,6 +121,8 @@ export interface Store {
   /** Non-terminal orders with persisted trade keys (startup hydration source). */
   getActiveOrders(terminalStatuses: readonly string[]): Promise<OrderRow[]>;
   updateLastSeenDmTs(orderId: string, ts: number): Promise<void>;
+  /** Persist the dispute id announced by Mostro for an order. */
+  updateDisputeId(orderId: string, disputeId: string): Promise<void>;
 
   close(): Promise<void>;
 }

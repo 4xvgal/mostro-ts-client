@@ -37,7 +37,8 @@ export function openSqliteStore(path = ":memory:"): Store {
       trade_index INTEGER,
       created_at INTEGER,
       expires_at INTEGER,
-      last_seen_dm_ts INTEGER
+      last_seen_dm_ts INTEGER,
+      dispute_id TEXT
     );
     CREATE TABLE IF NOT EXISTS admin_disputes (
       id TEXT PRIMARY KEY,
@@ -173,6 +174,10 @@ export function openSqliteStore(path = ":memory:"): Store {
            WHEN last_seen_dm_ts IS NULL OR ? > last_seen_dm_ts THEN ? ELSE last_seen_dm_ts END
          WHERE id = ?`,
       ).run(ts, ts, orderId);
+    },
+
+    async updateDisputeId(orderId: string, disputeId: string): Promise<void> {
+      db.prepare(`UPDATE orders SET dispute_id = ? WHERE id = ?`).run(disputeId, orderId);
     },
 
     async close(): Promise<void> {

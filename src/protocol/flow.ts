@@ -9,7 +9,7 @@ import { Kind, Status, newSmallOrder } from "./order.js";
 import type { SmallOrder } from "./order.js";
 import { newOrderMessage } from "./message.js";
 import type { Message, MessageKind, Payload } from "./message.js";
-import { verifyMessageKind } from "./verify.js";
+import { verifyMessageKind, getRating } from "./verify.js";
 
 /** Create a request_id: top 64 bits of a v4 UUID, as in mostrix. */
 export function newRequestId(): number {
@@ -284,4 +284,137 @@ export class CantDoError extends Error {
     this.reason = reason;
     this.requestId = requestId;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Rate user (mostrix execute_rate_user)
+// ---------------------------------------------------------------------------
+
+/** Build a Message::Order(RateUser) with the given rating (1..=5). */
+export function buildRateUserMessage(input: {
+  orderId: string;
+  requestId: number;
+  rating: number;
+}): Message {
+  if (input.rating < 1 || input.rating > 5) {
+    throw new Error(`Rating must be between 1 and 5, got ${input.rating}`);
+  }
+  const message = newOrderMessage(input.orderId, input.requestId, null, "rate-user", {
+    variant: "rating_user",
+    value: input.rating,
+  });
+  if (!verifyMessageKind(message.value)) {
+    throw new Error("built rate-user message failed verification");
+  }
+  return message;
+}
+
+/** Validate the reply to a RateUser send; Mostro must answer RateReceived. */
+export function handleRateUserResponse(kind: MessageKind, expectedRequestId: number): void {
+  if (kind.request_id === null) {
+    throw new Error("Response with null request_id");
+  }
+  if (kind.request_id !== expectedRequestId) {
+    throw new Error("Mismatched request_id");
+  }
+  if (kind.action !== "rate-received") {
+    throw new Error(`Unexpected action in response: ${kind.action}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Range orders — NextTrade payload (mostrix RANGE_ORDERS.md)
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute the NextTrade payload for a FiatSent/Release on a range order.
+ *
+ * Mirrors mostrix `create_msg_payload`: when the order is a range order and
+ * the remaining amount (max - current fiat_amount) still covers min_amount,
+ * the maker announces its next trade key so Mostro creates a fresh pending
+ * order for the remainder. The next trade index is reserved with `noneBase 0`.
+ *
+ * Returns null when no NextTrade is needed (fixed order, or range exhausted).
+ */
+export function computeNextTradePayload(input: {
+  /** Current order (must carry min_amount/max_amount/fiat_amount). */
+  order: SmallOrder;
+  /** Reserve the next trade key for the range continuation. */
+  reserveNext: (noneBase: 0) => { nextIndex: number; keys: { pubkey: string } };
+}): Payload | null {
+  const { order, reserveNext } = input;
+  const { min_amount: min, max_amount: max, fiat_amount: fiat } = order;
+  if (min === null || max === null) {
+    return null; // not a range order
+  }
+  if (max - fiat < min) {
+    return null; // remaining amount below the next trade minimum
+  }
+  const { nextIndex, keys } = reserveNext(0);
+  return {
+    variant: "next_trade",
+    value: [keys.pubkey, nextIndex],
+  };
+}
+
+/** Build a FiatSent or Release message, optionally carrying a NextTrade payload. */
+export function buildTradeCompletionMessage(input: {
+  orderId: string;
+  requestId: number;
+  action: "fiat-sent" | "release";
+  /** NextTrade payload when the range order continues; null otherwise. */
+  nextTrade?: Payload | null;
+}): Message {
+  return buildTradeMessage({
+    orderId: input.orderId,
+    requestId: input.requestId,
+    action: input.action,
+    payload: input.nextTrade ?? null,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Disputes — client-side state handling
+// ---------------------------------------------------------------------------
+
+/** Build a Message::Order(Dispute) to open a dispute on an order. */
+export function buildDisputeMessage(input: { orderId: string; requestId: number }): Message {
+  const message = newOrderMessage(input.orderId, input.requestId, null, "dispute", null);
+  if (!verifyMessageKind(message.value)) {
+    throw new Error("built dispute message failed verification");
+  }
+  return message;
+}
+
+export interface DisputeNotification {
+  /** The order the dispute was opened on. */
+  orderId: string;
+  /** The dispute id assigned by Mostro (Payload::Dispute tuple element 0). */
+  disputeId: string;
+  /** True when this client is the dispute initiator. */
+  initiatedByYou: boolean;
+}
+
+/**
+ * Handle the dispute notification from Mostro: after a dispute action, the
+ * daemon notifies the initiator with `DisputeInitiatedByYou` and the peer with
+ * `DisputeInitiatedByPeer`, both carrying `Payload::Dispute(dispute_id, None)`.
+ */
+export function handleDisputeNotification(kind: MessageKind): DisputeNotification {
+  const action = kind.action;
+  if (action !== "dispute-initiated-by-you" && action !== "dispute-initiated-by-peer") {
+    throw new Error(`Unexpected action in dispute notification: ${action}`);
+  }
+  if (kind.id === null) {
+    throw new Error("Dispute notification missing order id");
+  }
+  const payload = kind.payload;
+  if (!payload || payload.variant !== "dispute") {
+    throw new Error("Dispute notification missing dispute payload");
+  }
+  return {
+    orderId: kind.id,
+    disputeId: payload.value[0],
+    initiatedByYou: action === "dispute-initiated-by-you",
+  };
 }
