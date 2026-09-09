@@ -177,3 +177,111 @@ export function buildTradeMessage(input: {
   }
   return message;
 }
+
+// ---------------------------------------------------------------------------
+// Take order (mostrix take_order.rs)
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the payload for a take-order action. Mirrors
+ * `create_take_order_payload`:
+ * - TakeBuy: `Payload::Amount(amount)` when amount is set, else null.
+ * - TakeSell: `Payload::PaymentRequest` when an invoice is provided (with
+ *   optional range amount), else `Payload::Amount(amount ?? 0)`.
+ */
+export function buildTakeOrderPayload(input: {
+  action: "take-buy" | "take-sell";
+  invoice?: string | null;
+  amount?: number | null;
+}): Payload | null {
+  switch (input.action) {
+    case "take-buy":
+      return input.amount != null ? { variant: "amount", value: input.amount } : null;
+    case "take-sell": {
+      if (input.invoice) {
+        return {
+          variant: "payment_request",
+          value: [null, input.invoice, input.amount ?? null],
+        };
+      }
+      return { variant: "amount", value: input.amount ?? 0 };
+    }
+  }
+}
+
+/**
+ * Determine the take action from an order's kind, as mostrix does:
+ * taking a Buy order → TakeBuy (we sell sats); taking a Sell order →
+ * TakeSell (we buy sats).
+ */
+export function takeActionForOrder(order: SmallOrder): "take-buy" | "take-sell" {
+  switch (order.kind) {
+    case "buy":
+      return "take-buy";
+    case "sell":
+      return "take-sell";
+    default:
+      throw new Error("Order kind is not specified");
+  }
+}
+
+/**
+ * Dispatch the first Mostro reply to a take-order send.
+ *
+ * Expected outcomes (mostrix take_order):
+ * - Buy order taken (we sell): PayInvoice + PaymentRequest → hold invoice popup.
+ * - Sell order taken (we buy): order status update / PaymentRequest.
+ * - PayBondInvoice → taker bond popup.
+ * - CantDo → structured refusal.
+ */
+export function handleTakeOrderResponse(
+  kind: MessageKind,
+  expectedRequestId: number,
+): TakeOrderResponse {
+  if (kind.request_id === null) {
+    throw new Error("Response with null request_id");
+  }
+  if (kind.request_id !== expectedRequestId) {
+    throw new Error("Mismatched request_id");
+  }
+  switch (kind.action) {
+    case "pay-invoice":
+    case "pay-bond-invoice": {
+      const payload = kind.payload;
+      if (!payload || payload.variant !== "payment_request") {
+        throw new Error(`Mostro replied with ${kind.action} but no PaymentRequest payload`);
+      }
+      const [order, invoice, amount] = payload.value;
+      return {
+        type: kind.action === "pay-bond-invoice" ? "bond-invoice" : "hold-invoice",
+        order,
+        invoice,
+        amount,
+        requestId: kind.request_id,
+      };
+    }
+    case "cant-do": {
+      const reason = kind.payload && kind.payload.variant === "cant_do" ? kind.payload.value : null;
+      throw new CantDoError(reason, kind.request_id);
+    }
+    default:
+      throw new Error(`Unexpected action: ${kind.action}`);
+  }
+}
+
+export type TakeOrderResponse =
+  | { type: "hold-invoice"; order: SmallOrder | null; invoice: string; amount: number | null; requestId: number }
+  | { type: "bond-invoice"; order: SmallOrder | null; invoice: string; amount: number | null; requestId: number };
+
+/** Structured refusal from Mostro (`Payload::CantDo`). */
+export class CantDoError extends Error {
+  reason: string | null;
+  requestId: number | null;
+
+  constructor(reason: string | null, requestId: number | null) {
+    super(reason ? `CantDo: ${reason}` : "CantDo");
+    this.name = "CantDoError";
+    this.reason = reason;
+    this.requestId = requestId;
+  }
+}

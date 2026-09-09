@@ -48,9 +48,18 @@ export {
   newRequestId,
   buildNewOrder,
   buildTradeMessage,
+  buildTakeOrderPayload,
+  takeActionForOrder,
   handleNewOrderResponse,
+  handleTakeOrderResponse,
+  CantDoError,
 } from "./flow.js";
-export type { NewOrderInput, NewOrderOutcome, NewOrderResponse } from "./flow.js";
+export type {
+  NewOrderInput,
+  NewOrderOutcome,
+  NewOrderResponse,
+  TakeOrderResponse,
+} from "./flow.js";
 
 export { newSmallOrder, satsAmount, checkFiatAmount, checkAmount, checkZeroAmountWithPremium, checkRangeOrderLimits, checkFiatCurrency, isRangeOrder } from "./order.js";
 export type { Order, SmallOrder } from "./order.js";
@@ -104,3 +113,27 @@ export {
   payloadFromJson,
   smallOrderToJson,
 } from "./wire.js";
+
+export {
+  messageDigest,
+  signMessage,
+  verifyMessageSignature,
+  wrapMessageNip44,
+  unwrapMessageNip44,
+  pubkeyFromSecret,
+} from "./transport.js";
+export type { WrapOptions, UnwrappedMessage } from "./transport.js";
+
+export { sendDm, DmRouter, filterProtocolDmFromMostro, FETCH_EVENTS_TIMEOUT_MS } from "./dmRouter.js";
+export type { DmSendParams, DmRouterOptions } from "./dmRouter.js";
+
+export {
+  isTerminalTradeStatus,
+  statusPhaseRankForActor,
+  shouldApplyStatusTransition,
+  shouldStrictlyAdvanceStatus,
+  inferredStatusFromTradeAction,
+  mapActionToStatus,
+  parseStatus,
+  parseKind,
+} from "./stateMachine.js";
