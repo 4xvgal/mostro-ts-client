@@ -23,8 +23,8 @@ export interface NewOrderInput {
   kind?: string;
   /** ISO fiat code. Defaults to "USD". */
   fiatCode?: string;
-  /** Sats amount. 0 = derived from market price. */
-  amount: number;
+  /** Sats amount. 0 (default) = derived from market price. */
+  amount?: number;
   /** Fiat amount of the trade (or 0 for a range order). */
   fiatAmount: number;
   /** Range order bounds. Both must be set for a range order. */
@@ -63,7 +63,7 @@ export function buildNewOrder(
   const kindStr = (input.kind ?? "buy").trim().toLowerCase();
   const kind = kindStr === "sell" ? Kind.Sell : Kind.Buy;
   const fiatCode = (input.fiatCode ?? "USD").trim().toUpperCase();
-  const amount = input.amount;
+  const amount = input.amount ?? 0;
   const premium = input.premium ?? 0;
 
   const expirationDays = input.expirationDays ?? 1;
