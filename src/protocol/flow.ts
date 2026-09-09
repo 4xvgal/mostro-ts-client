@@ -3,7 +3,6 @@
 // deferred to the DM router phase; this module builds wire messages and
 // dispatches Mostro responses.
 
-import { randomUUID } from "node:crypto";
 import type { Action } from "./action.js";
 import { Kind, Status, newSmallOrder } from "./order.js";
 import type { SmallOrder } from "./order.js";
@@ -11,11 +10,16 @@ import { newOrderMessage } from "./message.js";
 import type { Message, MessageKind, Payload } from "./message.js";
 import { verifyMessageKind, getRating } from "./verify.js";
 
-/** Create a request_id: top 64 bits of a v4 UUID, as in mostrix. */
+/**
+ * Create a request_id safe for JS Number precision.
+ *
+ * Mostro treats request_id as u64 and echoes it back unchanged, so any value
+ * works — but a >2^53 value would lose precision in JS (JSON parse + SQLite
+ * INTEGER storage). Use 48 random bits (< 2^53), collision-safe for any
+ * realistic concurrent request count.
+ */
 export function newRequestId(): number {
-  const id = randomUUID();
-  const bytes = id.replace(/-/g, "");
-  return Number.parseInt(bytes.slice(0, 16), 16);
+  return Math.floor(Math.random() * 2 ** 48);
 }
 
 export interface NewOrderInput {

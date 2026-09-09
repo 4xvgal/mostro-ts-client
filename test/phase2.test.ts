@@ -205,10 +205,11 @@ test("buildTradeMessage produces verified messages for rate-user etc", () => {
   assert.equal(msg.value.request_id, 7);
 });
 
-test("request_id is a positive integer from uuid top bits", () => {
+test("request_id is a safe JS integer (< 2^53)", () => {
   const id = newRequestId();
-  assert.ok(Number.isInteger(id));
+  assert.ok(Number.isSafeInteger(id));
   assert.ok(id > 0);
+  assert.ok(id < 2 ** 53);
 });
 
 test("terminal status sets match mostrix", () => {

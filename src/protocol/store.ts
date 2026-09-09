@@ -38,6 +38,10 @@ export interface OrderRow {
   last_seen_dm_ts: number | null;
   /** Dispute UUID assigned by Mostro for this order. */
   dispute_id: string | null;
+  /** Trade pubkey of the solver that took the dispute. */
+  solver_pubkey: string | null;
+  /** ECDH shared secret for the user-to-solver dispute chat. */
+  dispute_chat_shared_key_hex: string | null;
 }
 
 export interface AdminDisputeRow {
@@ -123,6 +127,8 @@ export interface Store {
   updateLastSeenDmTs(orderId: string, ts: number): Promise<void>;
   /** Persist the dispute id announced by Mostro for an order. */
   updateDisputeId(orderId: string, disputeId: string): Promise<void>;
+  /** Persist the assigned solver and the derived user-to-solver chat secret. */
+  updateSolverChat(orderId: string, solverPubkey: string, sharedKeyHex: string): Promise<void>;
 
   close(): Promise<void>;
 }

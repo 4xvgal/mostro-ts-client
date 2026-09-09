@@ -38,7 +38,9 @@ export function openSqliteStore(path = ":memory:"): Store {
       created_at INTEGER,
       expires_at INTEGER,
       last_seen_dm_ts INTEGER,
-      dispute_id TEXT
+      dispute_id TEXT,
+      solver_pubkey TEXT,
+      dispute_chat_shared_key_hex TEXT
     );
     CREATE TABLE IF NOT EXISTS admin_disputes (
       id TEXT PRIMARY KEY,
@@ -178,6 +180,12 @@ export function openSqliteStore(path = ":memory:"): Store {
 
     async updateDisputeId(orderId: string, disputeId: string): Promise<void> {
       db.prepare(`UPDATE orders SET dispute_id = ? WHERE id = ?`).run(disputeId, orderId);
+    },
+
+    async updateSolverChat(orderId: string, solverPubkey: string, sharedKeyHex: string): Promise<void> {
+      db.prepare(
+        `UPDATE orders SET solver_pubkey = ?, dispute_chat_shared_key_hex = ? WHERE id = ?`,
+      ).run(solverPubkey, sharedKeyHex, orderId);
     },
 
     async close(): Promise<void> {

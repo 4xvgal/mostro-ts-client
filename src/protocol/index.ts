@@ -223,3 +223,6 @@ export {
   fetchPublicOrderBook,
 } from "./orderbook.js";
 export type { OrderEvent, OrdersFilter } from "./orderbook.js";
+
+export { applyTradeDm } from "./applicator.js";
+export type { AppliedDmResult } from "./applicator.js";
