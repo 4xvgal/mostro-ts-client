@@ -124,8 +124,8 @@ export {
 } from "./transport.js";
 export type { WrapOptions, UnwrappedMessage } from "./transport.js";
 
-export { sendDm, DmRouter, filterProtocolDmFromMostro, FETCH_EVENTS_TIMEOUT_MS } from "./dmRouter.js";
-export type { DmSendParams, DmRouterOptions } from "./dmRouter.js";
+export { sendDm, DmRouter, filterProtocolDmFromMostro, FETCH_EVENTS_TIMEOUT_MS, replayTradeDms } from "./dmRouter.js";
+export type { DmSendParams, DmRouterOptions, ReplayedDm } from "./dmRouter.js";
 
 export {
   isTerminalTradeStatus,
@@ -137,3 +137,19 @@ export {
   parseStatus,
   parseKind,
 } from "./stateMachine.js";
+
+export {
+  MOSTRO_INSTANCE_INFO_KIND,
+  emptyMostroInstanceInfo,
+  isInstanceInfoStale,
+  mostroInfoFromTags,
+  nostrPowFromInstance,
+  effectivePowFirstContactFromInstance,
+  isV2FirstContactProtocolAction,
+  nostrPowForProtocolDm,
+  instanceBondsEnabled,
+  transportFromInstance,
+  instanceInfoEventIsAuthentic,
+  selectAuthenticInstanceInfoEvent,
+} from "./mostroInfo.js";
+export type { MostroInstanceInfo } from "./mostroInfo.js";
