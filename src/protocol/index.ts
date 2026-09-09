@@ -237,3 +237,6 @@ export {
   handleAddBondInvoiceResponse,
 } from "./invoice.js";
 export type { InvoiceKind } from "./invoice.js";
+
+export { restoreSession, fetchLastTradeIndex } from "./restore.js";
+export type { RestoreSummary, LastTradeIndexInfo } from "./restore.js";
