@@ -254,3 +254,60 @@ function isOwnSignedOutbound(event: NostrEvent, tradeSecretHex: string): boolean
 }
 
 export { identityProofPayload };
+
+// ---------------------------------------------------------------------------
+// Restart recovery — relay DM replay (mostrix fetch_and_replay_startup_trade_dms)
+// ---------------------------------------------------------------------------
+
+export interface ReplayedDm {
+  orderId: string;
+  tradeSecretHex: string;
+  message: Message;
+  created_at: number;
+}
+
+/**
+ * Replay protocol DMs for a set of (order_id → trade_secret) pairs from the
+ * relay, decrypting each with its trade key. Used at startup to reconstruct
+ * in-flight trade state without a local message DB (stateless recovery).
+ */
+export async function replayTradeDms(params: {
+  pool: SimplePool;
+  relays: string[];
+  mostroPubkeyHex: string;
+  transport: Transport;
+  /** order_id → trade secret hex (from DB active orders). */
+  trades: Map<string, string>;
+  /** Fetch only DMs newer than this unix timestamp (seconds). */
+  since?: number;
+}): Promise<ReplayedDm[]> {
+  const { pool, relays, mostroPubkeyHex, transport, trades, since } = params;
+  const results: ReplayedDm[] = [];
+
+  for (const [orderId, tradeSecretHex] of trades) {
+    const tradePubkey = pubkeyFromSecret(tradeSecretHex);
+    const filter = filterProtocolDmFromMostro(transport, mostroPubkeyHex, tradePubkey);
+    if (since) {
+      filter.since = since;
+    }
+    const events = await pool.querySync(relays, filter);
+    for (const event of events) {
+      if (event.kind !== transportEventKind(transport)) {
+        continue;
+      }
+      const unwrapped = tryUnwrap(event, tradeSecretHex);
+      if (unwrapped === null) {
+        continue;
+      }
+      results.push({
+        orderId,
+        tradeSecretHex,
+        message: unwrapped.message,
+        created_at: event.created_at,
+      });
+    }
+  }
+
+  results.sort((a, b) => a.created_at - b.created_at);
+  return results;
+}

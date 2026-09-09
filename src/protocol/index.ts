@@ -164,3 +164,18 @@ export type {
   ReservedTradeIndex,
   OrderStoreResult,
 } from "./store.js";
+
+export {
+  generateSharedKey,
+  deriveChatKeys,
+  deriveChatKeysFromShared,
+} from "./chatKeys.js";
+export type { ChatKeys } from "./chatKeys.js";
+
+export {
+  CHAT_MAX_CLOCK_SKEW_SECS,
+  CHAT_MAX_CONTENT_BYTES,
+  wrapChatMessage,
+  unwrapChatMessage,
+} from "./chat.js";
+export type { ChatMessage } from "./chat.js";
