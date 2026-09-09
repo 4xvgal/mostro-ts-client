@@ -186,3 +186,29 @@ export {
   unwrapChatMessage,
 } from "./chat.js";
 export type { ChatMessage } from "./chat.js";
+
+export {
+  NO_SLASH,
+  bondSlashToPayload,
+  buildTakeDisputeMessage,
+  buildAdminSettleMessage,
+  buildAdminCancelMessage,
+  buildAddSolverMessage,
+  handleAdminFinalizeResponse,
+  handleTakeDisputeResponse,
+} from "./admin.js";
+export type { BondSlash } from "./admin.js";
+
+export { hexToNpub, npubToHex } from "./npub.js";
+
+export {
+  encryptBlob,
+  decryptBlob,
+  sha256Hex,
+  isAllowedExtension,
+  validateAttachment,
+  buildUploadAuthEvent,
+  signAuthEvent,
+  MAX_ATTACHMENT_BYTES,
+  ALLOWED_ATTACHMENT_EXTENSIONS,
+} from "./blossom.js";

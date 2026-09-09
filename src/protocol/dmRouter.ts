@@ -36,6 +36,8 @@ export interface DmSendParams {
   expiration?: number;
   /** NIP-13 proof-of-work difficulty. */
   pow?: number;
+  /** When set, the published event id is registered as own outbound. */
+  router?: DmRouter;
 }
 
 /** Wrap + sign + publish a protocol DM as a kind-14 event. */
@@ -64,6 +66,9 @@ export async function sendDm(params: DmSendParams): Promise<string> {
 
   const event = finalizeEvent(template, hex.decode(tradeSecretHex));
   await pool.publish(relays, event);
+  // Register as our own outbound so the router never mistakes the relay echo
+  // of this request for a daemon reply.
+  params.router?.noteOutbound(event.id);
   return event.id;
 }
 
@@ -121,6 +126,8 @@ export class DmRouter {
     new Map();
   private subscriptionByPubkey = new Map<string, string>();
   private running = false;
+  /** Event ids we published ourselves — never treated as daemon replies. */
+  private ownOutboundIds = new Set<string>();
 
   constructor(opts: DmRouterOptions) {
     this.pool = opts.pool;
@@ -168,6 +175,8 @@ export class DmRouter {
       return this.subscriptionByPubkey.get(tradePubkey)!;
     }
     const filter = filterProtocolDmFromMostro(this.transport, this.mostroPubkeyHex, tradePubkey);
+    // Self-addressed admin (mostro nsec as trade key): daemon omits #p on
+    // replies, so subscribe by author+kind only — matches mostrix.
     this.pool.subscribeMany(this.relays, filter, {
       onevent: (event) => this.handleEvent(event),
     });
@@ -178,8 +187,18 @@ export class DmRouter {
     return syntheticId;
   }
 
+  /** Register an event id we published (own outbound request). */
+  noteOutbound(eventId: string): void {
+    this.ownOutboundIds.add(eventId);
+  }
+
   private handleEvent(event: NostrEvent): void {
     if (event.kind !== transportEventKind(this.transport)) {
+      return;
+    }
+    // Skip our own published request echo — the daemon reply is always a
+    // different event id (covers self-addressed admin where author matches).
+    if (this.ownOutboundIds.has(event.id)) {
       return;
     }
     // Consume waiters first.
@@ -189,7 +208,7 @@ export class DmRouter {
         continue;
       }
       const unwrapped = tryUnwrap(event, waiter.tradeSecretHex);
-      if (unwrapped !== null && !isOwnSignedOutbound(event, waiter.tradeSecretHex)) {
+      if (unwrapped !== null) {
         waiter.resolve(event);
       } else {
         remaining.push(waiter);
@@ -242,15 +261,6 @@ function tryUnwrap(
   } catch {
     return null;
   }
-}
-
-/**
- * True when the event is our own signed v2 outbound request (the request echo
- * must not be consumed as the daemon reply). mostrix: is_own_signed_v2_outbound.
- */
-function isOwnSignedOutbound(event: NostrEvent, tradeSecretHex: string): boolean {
-  // Own outbound events are authored by the trade key itself.
-  return event.pubkey === pubkeyFromSecret(tradeSecretHex);
 }
 
 export { identityProofPayload };
