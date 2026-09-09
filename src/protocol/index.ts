@@ -162,6 +162,7 @@ export {
 export type { MostroInstanceInfo } from "./mostroInfo.js";
 
 export { openSqliteStore } from "./db.js";
+export { openIndexedDbStore } from "./idb.js";
 export type {
   Store,
   UserRow,

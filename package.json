@@ -25,6 +25,8 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@types/react": "^19.2.18",
+    "fake-indexeddb": "^6.2.5",
     "react": "^19.2.8"
   },
   "peerDependencies": {
