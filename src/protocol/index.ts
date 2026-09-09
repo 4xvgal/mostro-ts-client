@@ -153,3 +153,14 @@ export {
   selectAuthenticInstanceInfoEvent,
 } from "./mostroInfo.js";
 export type { MostroInstanceInfo } from "./mostroInfo.js";
+
+export { openSqliteStore } from "./db.js";
+export type {
+  Store,
+  UserRow,
+  OrderRow,
+  AdminDisputeRow,
+  SaveOrderInput,
+  ReservedTradeIndex,
+  OrderStoreResult,
+} from "./store.js";
