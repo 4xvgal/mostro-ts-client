@@ -249,4 +249,5 @@ export type {
   AppliedTradeState,
   CreateOrderResult,
   TakeOrderResult,
+  ClientStoreSink,
 } from "./client.js";

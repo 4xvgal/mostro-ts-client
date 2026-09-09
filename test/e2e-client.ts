@@ -6,6 +6,7 @@
 // Run: npx tsx test/e2e-client.ts
 
 import { MostroClient, generateMnemonic } from "../src/protocol/index.js";
+import { createMostroStore } from "../src/react/store.js";
 import { infoFromRelay } from "./lib/relay.js";
 import { SimplePool } from "nostr-tools/pool";
 
@@ -22,7 +23,15 @@ async function main() {
 
   const client = new MostroClient({ mnemonic, mostroPubkey, relays: RELAYS });
 
-  // Order book callback.
+  // Reactive store + client binding (React integration path).
+  const store = createMostroStore();
+  client.bind({
+    setOrders: (orders) => store.setOrders(orders),
+    upsertTrade: (id, row) => store.upsertTrade(id, row),
+    setInstanceInfo: (info) => store.setInstanceInfo(info),
+  });
+
+  // Order book callback (classic path).
   let bookSeen = false;
   client.onOrders((orders) => {
     bookSeen = true;
@@ -32,6 +41,8 @@ async function main() {
   await client.start();
   console.log("started, identity:", client.identity.slice(0, 16) + "...");
   console.log("bookSeen after start:", bookSeen);
+  console.log("store orders:", store.state.orders.length);
+  console.log("store status:", store.state.status);
 
   // Create order.
   const created = await client.createOrder({

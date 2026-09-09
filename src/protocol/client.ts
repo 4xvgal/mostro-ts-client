@@ -36,6 +36,13 @@ export interface MostroClientOptions {
   currencies?: string[];
 }
 
+/** Minimal reactive-store binding the client pushes into (see react/store.ts). */
+export interface ClientStoreSink {
+  setOrders: (orders: import("./order.js").SmallOrder[]) => void;
+  upsertTrade: (orderId: string, row: { status?: string | null; lastAction?: string | null; disputeId?: string | null }) => void;
+  setInstanceInfo?: (info: import("./mostroInfo.js").MostroInstanceInfo | null) => void;
+}
+
 export type OrderBookHandler = (orders: SmallOrder[]) => void;
 export type TradeHandler = (orderId: string, state: AppliedTradeState) => void;
 
@@ -79,6 +86,8 @@ export class MostroClient {
   private started = false;
   /** order_id → trade secret for routing DMs. */
   private trades = new Map<string, string>();
+  /** Optional reactive sink (React store) the client pushes into. */
+  private sink: ClientStoreSink | null = null;
 
   // Identity/trade keys derived from the mnemonic.
   private identitySecret: string;
@@ -121,6 +130,9 @@ export class MostroClient {
     const info: MostroInstanceInfo = infoEvent
       ? mostroInfoFromTags(infoEvent.tags)
       : { protocol_version: 2 } as MostroInstanceInfo;
+    if (this.sink?.setInstanceInfo) {
+      this.sink.setInstanceInfo(info);
+    }
 
     this.router = new DmRouter({
       pool: this.pool,
@@ -165,6 +177,18 @@ export class MostroClient {
   /** Subscribe to trade-state updates for an order. */
   onTrade(orderId: string, handler: TradeHandler): void {
     this.tradeHandlers.set(orderId, handler);
+  }
+
+  /**
+   * Bind a reactive sink (e.g. the React zustand store). The client pushes
+   * order-book snapshots and trade-state updates into it. Use instead of
+   * manual onOrders/onTrade when a UI store is present.
+   */
+  bind(sink: ClientStoreSink): void {
+    this.sink = sink;
+    if (this.orderBookHandler) {
+      this.orderBookHandler = null; // sink owns the book now
+    }
   }
 
   /** Fetch the current pending order book (for UIs that prefer explicit polls). */
@@ -333,11 +357,11 @@ export class MostroClient {
   // -------------------------------------------------------------------------
 
   private async refreshOrderBook(): Promise<void> {
-    if (!this.orderBookHandler) {
-      return;
-    }
     const orders = await this.fetchOrders().catch(() => []);
-    this.orderBookHandler(orders);
+    if (this.sink) {
+      this.sink.setOrders(orders);
+    }
+    this.orderBookHandler?.(orders);
   }
 
   private async handleInboundDm(orderId: string, message: Message): Promise<void> {
@@ -346,6 +370,13 @@ export class MostroClient {
       return;
     }
     const result = await applyTradeDm({ store: this.store, orderId, tradeSecretHex: tradeSecret, message });
+    if (this.sink) {
+      this.sink.upsertTrade(orderId, {
+        status: result.status,
+        lastAction: result.action,
+        disputeId: result.disputeId,
+      });
+    }
     const handler = this.tradeHandlers.get(orderId);
     if (handler) {
       handler(orderId, {

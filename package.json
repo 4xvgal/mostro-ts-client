@@ -21,6 +21,13 @@
     "nostr-tools": "^2.25.2",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2",
-    "zod": "^4.5.4"
+    "zod": "^4.5.4",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "react": "^19.2.8"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0"
   }
 }
