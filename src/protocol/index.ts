@@ -240,3 +240,13 @@ export type { InvoiceKind } from "./invoice.js";
 
 export { restoreSession, fetchLastTradeIndex } from "./restore.js";
 export type { RestoreSummary, LastTradeIndexInfo } from "./restore.js";
+
+export { MostroClient } from "./client.js";
+export type {
+  MostroClientOptions,
+  OrderBookHandler,
+  TradeHandler,
+  AppliedTradeState,
+  CreateOrderResult,
+  TakeOrderResult,
+} from "./client.js";
