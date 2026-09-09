@@ -10,3 +10,6 @@ dist/
 *.swp
 .idea/
 .vscode/
+
+# Regtest runtime artifacts (daemon DB, LND data)
+docker/regtest/config/mostro.db*
