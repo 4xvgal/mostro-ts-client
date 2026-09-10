@@ -506,7 +506,11 @@ export class MostroClient {
     });
 
     // Wait for a reply matching one of the expected actions (or CantDo).
+    // Register a fresh waiter per iteration: a non-matching DM (e.g. a state
+    // update racing the reply) consumes the previous waiter, so re-using it
+    // would loop forever on the same event.
     for (;;) {
+      const wait = this.router.waitForDm(tradeSecret);
       const event = (await Promise.race([
         wait,
         new Promise<never>((_, rej) =>
