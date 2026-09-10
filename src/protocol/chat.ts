@@ -6,7 +6,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { schnorr } from "@noble/curves/secp256k1.js";
 import { hex } from "@scure/base";
 import { encrypt as nip44Encrypt, decrypt as nip44Decrypt, v2 as nip44V2 } from "nostr-tools/nip44";
-import { finalizeEvent } from "nostr-tools/pure";
+import { finalizeEvent, verifyEvent } from "nostr-tools/pure";
 import type { NostrEvent, EventTemplate } from "nostr-tools/core";
 import { utf8Encoder } from "nostr-tools/utils";
 
@@ -85,7 +85,7 @@ export function unwrapChatMessage(params: {
   convPubkeyHex: string;
   signPubkeyHex: string;
   allowedSigners: string[];
-  outer: { kind: number; pubkey: string; content: string; tags: string[][]; created_at: number };
+  outer: { id?: string; kind: number; pubkey: string; content: string; tags: string[][]; created_at: number; sig?: string };
   now: number;
 }): ChatMessage {
   const { convSecretHex, convPubkeyHex, signPubkeyHex, allowedSigners, outer, now } = params;
@@ -114,8 +114,13 @@ export function unwrapChatMessage(params: {
     throw new Error("encrypted payload exceeds the accepted size");
   }
 
-  // 5. Outer signature (verified by relay in nostr-tools; re-checked here is
-  //    optional — skip since SimplePool verifies).
+  // 5. Outer signature — mandatory, mirrors mostro-core `outer.verify()`.
+  if (!outer.sig || !outer.id) {
+    throw new Error("outer event is missing its signature");
+  }
+  if (!verifyEvent(outer as unknown as NostrEvent)) {
+    throw new Error("invalid outer chat signature");
+  }
 
   // 6. Decrypt with K_conv self key exchange.
   const convKey = nip44V2.utils.getConversationKey(hex.decode(convSecretHex), convPubkeyHex);

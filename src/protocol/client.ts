@@ -481,13 +481,8 @@ export class MostroClient {
     this.chatSubscribed.add(chat.convPubkeyHex);
     const myTradePubkey = pubkeyFromSecret(tradeSecret);
     const solverPubkey = order.solver_pubkey;
-    const seen = new Set<string>();
-    this.pool.subscribeMany(this.opts.relays, { kinds: [14], "#p": [chat.convPubkeyHex] }, {
+    this.pool.subscribeMany(this.opts.relays, { kinds: [14], authors: [chat.signPubkeyHex], since: Math.floor(Date.now() / 1000) - 7 * 86400 }, {
       onevent: (event) => {
-        if (seen.has(event.id)) {
-          return;
-        }
-        seen.add(event.id);
         try {
           const msg = unwrapChatMessage({
             convSecretHex: chat.convSecretHex,
