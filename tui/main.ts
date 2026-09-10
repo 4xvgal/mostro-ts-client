@@ -176,17 +176,34 @@ async function main() {
       orders.push(...list);
     }
     if (selectedIdx >= orders.length) selectedIdx = Math.max(0, orders.length - 1);
+    const pad = (s: string, n: number) => s.padEnd(n).slice(0, n);
+    const visibleLen = (s: string) => s.replace(/\{[^}]*\}/g, "").length;
+    const inner = Number(screen.width) - 2;
+    const fill = (line: string) => line + " ".repeat(Math.max(0, inner - visibleLen(line)));
+    const head = fill(
+      `${" ".repeat(2)}${pad("Kind", 6)}${pad("Order", 9)}${pad("Amount", 9)}${pad("Fiat", 5)}${pad("FiatAmt", 8)}${pad("Prem", 6)}${pad("Rating", 11)}${pad("Payment", 16)}${pad("Created", 12)}`,
+    );
     const lines = orders.map((o, i) => {
       const sel = i === selectedIdx ? "{green-fg}{bold}> {/}" : "  ";
-      const kind = o.kind === "sell" ? "{yellow-fg}SELL{/}" : "{cyan-fg}BUY{/}";
       const r = o.rating;
       const avg = r && r.total_reviews > 0 ? Math.min(5, Math.max(0, Math.round(r.total_rating / r.total_reviews))) : 0;
       const stars = avg > 0
-        ? ` {yellow-fg}${"★".repeat(avg)}${"☆".repeat(5 - avg)}{/}(${r!.total_reviews})`
+        ? `{yellow-fg}${"★".repeat(avg)}${"☆".repeat(5 - avg)}{/}(${r!.total_reviews})`
+        : "·";
+      const created = o.created_at
+        ? new Date(o.created_at * 1000).toISOString().slice(5, 16).replace("T", " ")
         : "";
-      return `${sel}${kind} ${o.fiat_amount} ${o.fiat_code} @ ${o.amount === 0 ? "market" : o.amount}sats${stars} [${o.payment_method}] ${o.id?.slice(0, 8)}`;
+      const kind = o.kind === "sell"
+        ? `{yellow-fg}${pad("SELL", 6)}{/}`
+        : `{cyan-fg}${pad("BUY", 6)}{/}`;
+      const row =
+        `${sel}${kind}${pad(o.id?.slice(0, 8) ?? "-", 9)}` +
+        `${pad(o.amount === 0 ? "market" : `${o.amount}sats`, 9)}${pad(o.fiat_code, 5)}` +
+        `${pad(`${o.fiat_amount}`, 8)}${pad(`${o.premium > 0 ? "+" : ""}${o.premium}%`, 6)}` +
+        `${pad(stars, 11)}${pad(o.payment_method, 16)}${pad(created, 12)}`;
+      return fill(row);
     });
-    ordersBox.setContent(lines.join("\n"));
+    ordersBox.setContent([head, ...lines].join("\n"));
     screen.render();
   };
   client.onOrders(renderBook);
