@@ -448,7 +448,8 @@ async function main() {
       } else {
         box.destroy();
         invoicePrompt = null;
-        screen.render();
+        // Esc from invoice input returns to the trade actions popup.
+        openTradeActions(orderId);
       }
     });
     screen.render();
@@ -529,7 +530,7 @@ async function main() {
     screen.render();
   };
 
-  const buildActions = (orderId: string): Array<{ label: string; run: () => void }> => {
+  const buildActions = async (orderId: string): Promise<Array<{ label: string; run: () => void }>> => {
     const t = tradesList.find((x) => x.id === orderId);
     const items: Array<{ label: string; run: () => void }> = [];
     const state = (t?.status ?? "").toLowerCase();
@@ -566,6 +567,18 @@ async function main() {
         });
       }
     }
+    if (await client.canOrderChat(orderId)) {
+      items.push({
+        label: "Peer chat",
+        run: () => showChat(orderId, "peer"),
+      });
+    }
+    if (tradesList.find((x) => x.id === orderId)?.solver_pubkey) {
+      items.push({
+        label: "Solver chat",
+        run: () => showChat(orderId, "solver"),
+      });
+    }
     items.push({
       label: "View messages",
       run: () => {
@@ -583,7 +596,7 @@ async function main() {
     await renderTrades();
     actionOrderId = orderId;
     actionCursor = 0;
-    actionItems = buildActions(orderId);
+    actionItems = await buildActions(orderId);
     actionPopup = blessed.box({
       parent: screen,
       top: "center",
@@ -601,7 +614,7 @@ async function main() {
   const refreshActionPopup = async () => {
     if (!actionPopup || !actionOrderId) return;
     await renderTrades();
-    actionItems = buildActions(actionOrderId);
+    actionItems = await buildActions(actionOrderId);
     actionCursor = Math.min(actionCursor, Math.max(0, actionItems.length - 1));
     renderActionPopup();
   };
@@ -653,6 +666,78 @@ async function main() {
     rateOrderId = orderId;
     rateValue = 5;
     renderRatePicker();
+  };
+
+  // ----- peer / solver chat popup -----
+  let chatPrompt: blessed.Widgets.BoxElement | null = null;
+  const showChat = (orderId: string, mode: "peer" | "solver") => {
+    closeActionPopup();
+    chatPrompt?.destroy();
+    let closed = false;
+    const box = blessed.box({
+      parent: screen,
+      top: "center",
+      left: "center",
+      width: 90,
+      height: 24,
+      border: { type: "line" },
+      label: mode === "peer" ? " Peer chat " : " Solver chat ",
+      tags: true,
+      scrollable: true,
+      alwaysScroll: true,
+    });
+    chatPrompt = box;
+    const input = blessed.textbox({
+      parent: box,
+      bottom: 1,
+      left: 1,
+      width: 86,
+      height: 1,
+    });
+    const renderChat = () => {
+      if (closed) return;
+      const history = mode === "peer" ? client.getOrderChat(orderId) : client.getDisputeChat(orderId);
+      const t = tradesList.find((x) => x.id === orderId);
+      const myTradePub = t?.trade_index != null ? deriveTradeKeys(mnemonic, t.trade_index).pubkey : client.identity;
+      const peerLabel = mode === "solver" ? "solver" : "peer";
+      const body = history.length
+        ? history
+            .map((m) => {
+              const mine = m.sender === myTradePub;
+              const who = mine ? "{green-fg}(me){/}" : `{yellow-fg}(${peerLabel}){/}`;
+              const time = new Date(m.created_at * 1000).toISOString().slice(11, 19);
+              return `{cyan-fg}(${time}){/} ${who} ${m.content}`;
+            })
+            .join("\n")
+        : "(no messages — type below, Enter sends, Esc closes)";
+      box.setContent(`${body}\n`);
+      box.scrollTo(box.getScrollHeight());
+      screen.render();
+    };
+    const read = () => {
+      input.readInput(() => {
+        const text = input.getValue().trim();
+        if (!text) {
+          closed = true;
+          box.destroy();
+          chatPrompt = null;
+          // Esc from chat returns to the trade actions popup.
+          openTradeActions(orderId);
+          return;
+        }
+        input.clearValue();
+        const send = mode === "peer" ? client.sendOrderChat(orderId, text) : client.sendDisputeChat(orderId, text);
+        send
+          .then(() => renderChat())
+          .catch((e: Error) => log(`chat failed: ${e.message}`))
+          .finally(() => read());
+      });
+    };
+    client.onOrderChat(orderId, () => renderChat());
+    client.onDisputeChat(orderId, () => renderChat());
+    renderChat();
+    input.focus();
+    read();
   };
   const sendRate = () => {
     const orderId = rateOrderId;
@@ -720,7 +805,11 @@ async function main() {
     fn?.();
   });
   screen.key(["n", "escape"], () => {
-    if (ratePopup) closeRatePicker();
+    if (ratePopup) {
+      const oid = rateOrderId;
+      closeRatePicker();
+      if (oid) openTradeActions(oid);
+    }
     if (actionPopup) closeActionPopup();
     if (confirmActive) closeConfirm();
   });
