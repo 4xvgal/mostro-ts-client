@@ -62,6 +62,9 @@ function resolvedStatusCandidate(action: Action, payload: Payload | null): strin
       return "settled-hold-invoice";
     case "purchase-completed":
       return "success";
+    case "dispute-initiated-by-you":
+    case "dispute-initiated-by-peer":
+      return "dispute";
     default:
       return null;
   }

@@ -12,11 +12,14 @@ import type { SmallOrder } from "./order.js";
 import { deriveIdentityKeys } from "./keys.js";
 import type { Store, UserRow } from "./store.js";
 import { DmRouter, sendDm, FETCH_EVENTS_TIMEOUT_MS } from "./dmRouter.js";
-import { unwrapMessageNip44 } from "./transport.js";
+import { unwrapMessageNip44, pubkeyFromSecret } from "./transport.js";
+import { deriveChatKeys } from "./chatKeys.js";
+import { wrapChatMessage, unwrapChatMessage } from "./chat.js";
+import type { ChatMessage } from "./chat.js";
 import { fetchPublicOrderBook } from "./orderbook.js";
 import { applyTradeDm } from "./applicator.js";
 import { restoreSession } from "./restore.js";
-import { buildNewOrder, buildTradeMessage, buildTakeOrderPayload, takeActionForOrder, newRequestId, handleNewOrderResponse, handleTakeOrderResponse, buildDisputeMessage } from "./flow.js";
+import { buildNewOrder, buildTradeMessage, buildTakeOrderPayload, takeActionForOrder, newRequestId, handleNewOrderResponse, handleTakeOrderResponse, buildDisputeMessage, handleDisputeNotification } from "./flow.js";
 import { buildInvoiceMessage, handleAddInvoiceResponse } from "./invoice.js";
 import { buildRateUserMessage, handleRateUserResponse } from "./flow.js";
 import { mostroInfoFromTags } from "./mostroInfo.js";
@@ -95,6 +98,12 @@ export class MostroClient {
   private messageHandlers = new Map<string, (dm: { timestamp: number; message: Message }) => void>();
   /** Global inbound-DM callback (any order), for invoice extraction UIs. */
   private anyMessageHandler: ((orderId: string, dm: { timestamp: number; message: Message }) => void) | null = null;
+  /** order_id → user↔solver dispute chat history. */
+  private disputeChatHistory = new Map<string, ChatMessage[]>();
+  /** order_id → callback on a new dispute chat message. */
+  private disputeChatHandlers = new Map<string, (msg: ChatMessage) => void>();
+  /** Dedupe: conversation pubkey → subscribed. */
+  private chatSubscribed = new Set<string>();
 
   // Identity/trade keys derived from the mnemonic.
   private identitySecret: string;
@@ -156,6 +165,9 @@ export class MostroClient {
       if (order.trade_keys && order.trade_index !== null) {
         this.trades.set(order.id, order.trade_keys);
         this.router.trackOrder(order.id, order.trade_keys);
+      }
+      if (order.solver_pubkey) {
+        await this.trackDisputeChat(order.id);
       }
     }
 
@@ -368,11 +380,22 @@ export class MostroClient {
     await this.roundtrip(tradeSecret, message, "fiat-sent-ok", "hold-invoice-payment-settled");
   }
 
+  /**
+   * Cooperative cancel. Both parties send this; the first marks the initiator,
+   * the second completes the cancel (hold invoice canceled, seller refunded).
+   */
+  async cancelOrder(orderId: string): Promise<void> {
+    const tradeSecret = this.requireTradeSecret(orderId);
+    const message = buildTradeMessage({ orderId, requestId: newRequestId(), action: "cancel", payload: null });
+    await this.roundtrip(tradeSecret, message, "cooperative-cancel-initiated-by-you", "cooperative-cancel-accepted");
+  }
+
   /** Open a dispute on an order. */
-  async openDispute(orderId: string): Promise<void> {
+  async openDispute(orderId: string): Promise<string> {
     const tradeSecret = this.requireTradeSecret(orderId);
     const message = buildDisputeMessage({ orderId, requestId: newRequestId() });
-    await this.roundtrip(tradeSecret, message, "dispute-initiated-by-you", "dispute-initiated-by-peer");
+    const reply = await this.roundtrip(tradeSecret, message, "dispute-initiated-by-you", "dispute-initiated-by-peer");
+    return handleDisputeNotification(reply).disputeId;
   }
 
   /** Rate the counterpart of a completed trade (1..=5). */
@@ -382,6 +405,90 @@ export class MostroClient {
     const message = buildRateUserMessage({ orderId, requestId, rating });
     const reply = await this.roundtrip(tradeSecret, message, "rate-received");
     handleRateUserResponse(reply, requestId);
+  }
+
+  /** Subscribe to user↔solver dispute chat for an order. */
+  onDisputeChat(orderId: string, handler: (msg: ChatMessage) => void): void {
+    this.disputeChatHandlers.set(orderId, handler);
+  }
+
+  /** Dispute chat history for an order (session-scoped). */
+  getDisputeChat(orderId: string): ChatMessage[] {
+    return this.disputeChatHistory.get(orderId) ?? [];
+  }
+
+  /** Send a message to the dispute solver (encrypted user↔solver chat). */
+  async sendDisputeChat(orderId: string, message: string): Promise<void> {
+    const tradeSecret = this.requireTradeSecret(orderId);
+    const order = await this.store.getOrder(orderId);
+    if (!order?.solver_pubkey || !order.dispute_chat_shared_key_hex) {
+      throw new Error(`no solver assigned to order ${orderId}`);
+    }
+    const chat = deriveChatKeys(tradeSecret, order.solver_pubkey);
+    const { event } = wrapChatMessage({
+      senderTradeSecretHex: tradeSecret,
+      convSecretHex: chat.convSecretHex,
+      convPubkeyHex: chat.convPubkeyHex,
+      signSecretHex: chat.signSecretHex,
+      message,
+    });
+    await this.pool.publish(this.opts.relays, event);
+    this.recordDisputeChat(orderId, {
+      content: message,
+      sender: pubkeyFromSecret(tradeSecret),
+      created_at: event.created_at,
+      innerEventId: "",
+      outerEventId: event.id,
+    });
+  }
+
+  /**
+   * Subscribe the user↔solver chat conversation for a disputed order. The
+   * solver pubkey + shared key come from the AdminTookDispute DM (applicator)
+   * or a prior restore.
+   */
+  private async trackDisputeChat(orderId: string): Promise<void> {
+    const tradeSecret = this.trades.get(orderId);
+    const order = await this.store.getOrder(orderId);
+    if (!tradeSecret || !order?.solver_pubkey || !order.dispute_chat_shared_key_hex) {
+      return;
+    }
+    const chat = deriveChatKeys(tradeSecret, order.solver_pubkey);
+    if (this.chatSubscribed.has(chat.convPubkeyHex)) {
+      return;
+    }
+    this.chatSubscribed.add(chat.convPubkeyHex);
+    const myTradePubkey = pubkeyFromSecret(tradeSecret);
+    const solverPubkey = order.solver_pubkey;
+    const seen = new Set<string>();
+    this.pool.subscribeMany(this.opts.relays, { kinds: [14], "#p": [chat.convPubkeyHex] }, {
+      onevent: (event) => {
+        if (seen.has(event.id)) {
+          return;
+        }
+        seen.add(event.id);
+        try {
+          const msg = unwrapChatMessage({
+            convSecretHex: chat.convSecretHex,
+            convPubkeyHex: chat.convPubkeyHex,
+            signPubkeyHex: chat.signPubkeyHex,
+            allowedSigners: [myTradePubkey, solverPubkey],
+            outer: event,
+            now: Math.floor(Date.now() / 1000),
+          });
+          this.recordDisputeChat(orderId, msg);
+        } catch {
+          // Not a valid conversation message (replay / other channel).
+        }
+      },
+    });
+  }
+
+  private recordDisputeChat(orderId: string, msg: ChatMessage): void {
+    const list = this.disputeChatHistory.get(orderId) ?? [];
+    list.push(msg);
+    this.disputeChatHistory.set(orderId, list);
+    this.disputeChatHandlers.get(orderId)?.(msg);
   }
 
   /** Restore session state from Mostro (rebuilds store + trade routing). */
@@ -408,6 +515,9 @@ export class MostroClient {
         this.trades.set(order.id, order.trade_keys);
         this.router?.trackOrder(order.id, order.trade_keys);
       }
+      if (order.solver_pubkey) {
+        await this.trackDisputeChat(order.id);
+      }
     }
   }
 
@@ -429,6 +539,9 @@ export class MostroClient {
       return;
     }
     const result = await applyTradeDm({ store: this.store, orderId, tradeSecretHex: tradeSecret, message });
+    if (result.solver) {
+      await this.trackDisputeChat(orderId);
+    }
     if (this.sink) {
       this.sink.upsertTrade(orderId, {
         status: result.status,

@@ -88,7 +88,8 @@ test("rank ordering by kind", () => {
   assert.equal(statusPhaseRankForActor("waiting-buyer-invoice", "buy"), 2);
   assert.equal(statusPhaseRankForActor("waiting-buyer-invoice", "sell"), 1);
   assert.equal(statusPhaseRankForActor("pending", "sell"), 0);
-  assert.equal(statusPhaseRankForActor("success", "sell"), 6);
+  assert.equal(statusPhaseRankForActor("success", "sell"), 7);
+  assert.equal(statusPhaseRankForActor("dispute", "sell"), 6);
   assert.equal(statusPhaseRankForActor("canceled", "sell"), null);
 });
 
@@ -114,4 +115,6 @@ test("mapActionToStatus prefers explicit order status", () => {
 
   const noStatus = { ...order, status: null as const };
   assert.equal(mapActionToStatus("purchase-completed", noStatus), "success");
+  assert.equal(mapActionToStatus("dispute-initiated-by-you", noStatus), "dispute");
+  assert.equal(mapActionToStatus("dispute-initiated-by-peer", noStatus), "dispute");
 });

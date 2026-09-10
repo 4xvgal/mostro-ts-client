@@ -46,8 +46,10 @@ export function statusPhaseRankForActor(status: Status, kind: Kind | null): numb
       return 4;
     case "settled-hold-invoice":
       return 5;
-    case "success":
+    case "dispute":
       return 6;
+    case "success":
+      return 7;
     default:
       return null;
   }
@@ -142,6 +144,9 @@ export function inferredStatusFromTradeAction(action: Action): Status | null {
       return "settled-hold-invoice";
     case "purchase-completed":
       return "success";
+    case "dispute-initiated-by-you":
+    case "dispute-initiated-by-peer":
+      return "dispute";
     default:
       return null;
   }
