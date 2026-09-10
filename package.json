@@ -1,6 +1,6 @@
 {
   "name": "mostro-ts-client",
-  "version": "0.1.0",
+  "version": "0.2.0-rc.0",
   "description": "TypeScript client for the Mostro P2P Lightning-over-Nostr marketplace",
   "main": "./dist/protocol/index.js",
   "types": "./dist/protocol/index.d.ts",
