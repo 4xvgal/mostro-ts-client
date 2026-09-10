@@ -69,10 +69,32 @@ test("reset clears everything", () => {
   assert.deepEqual(store.state.trades, {});
 });
 
-test("connect hooks order-book updates (via sink shape)", () => {
+test("connect binds the client sink into the store", () => {
   const store = createMostroStore();
-  // The client's bind() calls setOrders/upsertTrade — verify they route in.
-  store.connect({ onOrders: (cb: (o: unknown[]) => void) => cb([sampleOrder("o1")]) } as never);
-  // connect calls setState({status:"connecting"}) only; orders flow via setOrders.
+  let sink: {
+    setOrders: (o: unknown[]) => void;
+    upsertTrade: (id: string, row: unknown) => void;
+    setUser: (u: { pubkey: string; lastTradeIndex: number }) => void;
+    upsertChatMessage: (id: string, scope: "order" | "dispute", msg: unknown) => void;
+  } | null = null;
+  store.connect({
+    bind: (s: typeof sink) => {
+      sink = s;
+    },
+  } as never);
   assert.equal(store.state.status, "connecting");
+  sink!.setOrders([sampleOrder("o1")]);
+  assert.equal(store.state.orders.length, 1);
+  sink!.setUser({ pubkey: "pk", lastTradeIndex: 2 });
+  assert.equal(store.state.status, "ready");
+  assert.equal(store.state.user?.pubkey, "pk");
+  sink!.upsertChatMessage("o1", "order", {
+    content: "hi",
+    sender: "s",
+    created_at: 1,
+    innerEventId: "",
+    outerEventId: "e1",
+  });
+  assert.equal(store.state.chats.o1?.order.length, 1);
+  assert.equal(store.state.chats.o1?.order[0]?.content, "hi");
 });

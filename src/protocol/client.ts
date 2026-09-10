@@ -52,11 +52,24 @@ export interface MostroClientOptions {
   blossomServers?: readonly string[];
 }
 
+/** User reputation snapshot from a `rating` event (kind 38384). */
+export interface UserRating {
+  total_reviews: number;
+  total_rating: number;
+  last_rating: number | null;
+  max_rate: number | null;
+  min_rate: number | null;
+}
+
 /** Minimal reactive-store binding the client pushes into (see react/store.ts). */
 export interface ClientStoreSink {
   setOrders: (orders: import("./order.js").SmallOrder[]) => void;
   upsertTrade: (orderId: string, row: { status?: string | null; lastAction?: string | null; disputeId?: string | null }) => void;
   setInstanceInfo?: (info: import("./mostroInfo.js").MostroInstanceInfo | null) => void;
+  /** Append an inbound/sent chat message (order peer or dispute solver chat). */
+  upsertChatMessage?: (orderId: string, scope: "order" | "dispute", msg: ChatMessage) => void;
+  /** Identity / trade-index snapshot. */
+  setUser?: (user: { pubkey: string; lastTradeIndex: number }) => void;
 }
 
 export type OrderBookHandler = (orders: SmallOrder[]) => void;
@@ -200,6 +213,13 @@ export class MostroClient {
     await this.refreshOrderBook();
 
     this.started = true;
+    await this.pushUser();
+  }
+
+  private async pushUser(): Promise<void> {
+    if (!this.sink?.setUser) return;
+    const user = await this.store.getUser();
+    this.sink.setUser({ pubkey: this.identity, lastTradeIndex: user?.last_trade_index ?? 0 });
   }
 
   /** Stop background tasks. */
@@ -442,6 +462,35 @@ export class MostroClient {
     );
   }
 
+  /** The stored user row (identity pubkey, mnemonic, last trade index). */
+  async getUser(): Promise<UserRow | null> {
+    return this.store.getUser();
+  }
+
+  /** Fetch a user's reputation snapshot (kind-38384 `rating` event), or null. */
+  async fetchRating(pubkey: string): Promise<UserRating | null> {
+    const events = await this.pool.querySync(this.opts.relays, {
+      kinds: [38384],
+      authors: [this.opts.mostroPubkey],
+      "#d": [pubkey],
+      limit: 1,
+    });
+    const ev = events[0];
+    if (!ev) return null;
+    const tag = (k: string): string | null => ev.tags.find((t) => t[0] === k)?.[1] ?? null;
+    const num = (k: string): number | null => {
+      const v = tag(k);
+      return v == null ? null : Number(v);
+    };
+    return {
+      total_reviews: num("total_reviews") ?? 0,
+      total_rating: num("total_rating") ?? 0,
+      last_rating: num("last_rating"),
+      max_rate: num("max_rate"),
+      min_rate: num("min_rate"),
+    };
+  }
+
   /** Open a dispute on an order. */
   async openDispute(orderId: string): Promise<string> {
     const tradeSecret = this.requireTradeSecret(orderId);
@@ -624,6 +673,7 @@ export class MostroClient {
       created_at: msg.created_at,
       inner_event_id: msg.innerEventId,
     });
+    this.sink?.upsertChatMessage?.(orderId, "order", msg);
     this.orderChatHandlers.get(orderId)?.(msg);
   }
 
@@ -709,6 +759,7 @@ export class MostroClient {
       created_at: msg.created_at,
       inner_event_id: msg.innerEventId,
     });
+    this.sink?.upsertChatMessage?.(orderId, "dispute", msg);
     this.disputeChatHandlers.get(orderId)?.(msg);
   }
 
@@ -760,6 +811,7 @@ export class MostroClient {
       }
       await this.hydrateChat(order.id);
     }
+    await this.pushUser();
   }
 
   // -------------------------------------------------------------------------

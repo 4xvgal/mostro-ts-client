@@ -263,4 +263,5 @@ export type {
   CreateOrderResult,
   TakeOrderResult,
   ClientStoreSink,
+  UserRating,
 } from "./client.js";
