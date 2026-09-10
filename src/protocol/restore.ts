@@ -8,7 +8,7 @@ import { newRestoreMessage } from "./message.js";
 import { newOrderMessage } from "./message.js";
 import type { Message, Payload, RestoreSessionInfo } from "./message.js";
 import { sendDm } from "./dmRouter.js";
-import { unwrapMessageNip44 } from "./transport.js";
+import { unwrapMessageNip44, verifyEventSignature } from "./transport.js";
 import { deriveTradeKeys } from "./keys.js";
 import { isTerminalTradeStatus } from "./stateMachine.js";
 import type { Store } from "./store.js";
@@ -91,11 +91,13 @@ export async function restoreSession(params: {
   };
 
   // Advance last_trade_index BEFORE writing rows (index is authoritative).
-  const restoreMax = Math.max(
-    ...restoreData.orders.map((o) => o.trade_index),
-    ...restoreData.disputes.map((d) => d.trade_index),
-    0,
-  );
+  let restoreMax = 0;
+  for (const o of restoreData.orders) {
+    if (o.trade_index > restoreMax) restoreMax = o.trade_index;
+  }
+  for (const d of restoreData.disputes) {
+    if (d.trade_index > restoreMax) restoreMax = d.trade_index;
+  }
   const effectiveLast = Math.max(restoreMax, mostroLast.lastUsedIndex);
   const user = await store.getUser();
   const currentLast = user?.last_trade_index ?? 0;
@@ -252,10 +254,11 @@ async function roundtripDm(params: {
     ])) as NostrEvent | "timeout";
 
     let candidate: NostrEvent | null = null;
-    if (event !== "timeout") {
+    if (event !== "timeout" && event.pubkey === mostroPubkeyHex && verifyEventSignature(event)) {
       const u = unwrapMessageNip44({
         event: { kind: event.kind, pubkey: event.pubkey, content: event.content },
         receiverSecretHex: tradeSecretHex,
+        requireSignature: true,
       });
       if (u && actionMatchesExpected(u.message.value.action, params.expectedAction)) {
         candidate = event;
@@ -265,9 +268,13 @@ async function roundtripDm(params: {
       // Poll the relay history for a matching reply (e.g. restore response).
       const evs = await pool.querySync(relays, filter);
       for (const e of evs) {
+        if (e.pubkey !== mostroPubkeyHex || !verifyEventSignature(e)) {
+          continue;
+        }
         const u = unwrapMessageNip44({
           event: { kind: e.kind, pubkey: e.pubkey, content: e.content },
           receiverSecretHex: tradeSecretHex,
+          requireSignature: true,
         });
         if (u && actionMatchesExpected(u.message.value.action, params.expectedAction)) {
           candidate = e;
@@ -279,6 +286,7 @@ async function roundtripDm(params: {
       const u = unwrapMessageNip44({
         event: { kind: candidate.kind, pubkey: candidate.pubkey, content: candidate.content },
         receiverSecretHex: tradeSecretHex,
+        requireSignature: true,
       });
       if (u) {
         return { sender: candidate.pubkey, message: u.message };

@@ -235,20 +235,17 @@ export function messageKindFromJson(parsed: unknown): MessageKind {
   const obj = parsed as Record<string, unknown>;
   const version = obj.version;
   const action = obj.action;
-  const request_id = obj.request_id ?? null;
-  const trade_index = obj.trade_index ?? null;
-  const id = obj.id ?? null;
-  if (typeof version !== "number") {
-    throw new Error("MessageKind.version must be a number");
+  if (typeof version !== "number" || !Number.isFinite(version)) {
+    throw new Error("MessageKind.version must be a finite number");
   }
   if (typeof action !== "string") {
     throw new Error("MessageKind.action must be a string");
   }
   return {
     version,
-    request_id: (request_id as number | null) ?? null,
-    trade_index: (trade_index as number | null) ?? null,
-    id: (id as string | null) ?? null,
+    request_id: optionalInteger(obj.request_id) ?? null,
+    trade_index: optionalInteger(obj.trade_index) ?? null,
+    id: optionalString(obj.id) ?? null,
     action: action as MessageKind["action"],
     payload: obj.payload === null || obj.payload === undefined ? null : payloadFromJson(obj.payload),
   };
@@ -423,16 +420,21 @@ function paymentFailedFromJson(parsed: unknown) {
   };
 }
 
+const MAX_RESTORE_ITEMS = 10_000;
+
 function restoreSessionInfoFromJson(parsed: unknown): RestoreSessionInfo {
   const o = parsed as Record<string, unknown>;
   const orders = (o.orders as unknown[] | null) ?? [];
   const disputes = (o.disputes as unknown[] | null) ?? [];
+  if (orders.length > MAX_RESTORE_ITEMS || disputes.length > MAX_RESTORE_ITEMS) {
+    throw new Error(`restore payload exceeds ${MAX_RESTORE_ITEMS} items`);
+  }
   return {
     orders: orders.map((x: unknown) => {
       const r = x as Record<string, unknown>;
       return {
         order_id: requireString(r.order_id),
-        trade_index: requireNumber(r.trade_index),
+        trade_index: requireInteger(r.trade_index),
         status: requireString(r.status),
       };
     }),
@@ -441,10 +443,10 @@ function restoreSessionInfoFromJson(parsed: unknown): RestoreSessionInfo {
       return {
         dispute_id: requireString(r.dispute_id),
         order_id: requireString(r.order_id),
-        trade_index: requireNumber(r.trade_index),
+        trade_index: requireInteger(r.trade_index),
         status: requireString(r.status),
         initiator: (r.initiator as import("./message.js").DisputeInitiator | null) ?? null,
-        solver_pubkey: (r.solver_pubkey as string | null) ?? null,
+        solver_pubkey: optionalString(r.solver_pubkey),
       };
     }),
   };
@@ -499,18 +501,45 @@ function cashuProofSignatureArrayFromJson(parsed: unknown): CashuProofSignature[
   });
 }
 
+const MAX_STRING_LENGTH = 1_000_000;
+
 function requireString(v: unknown): string {
   if (typeof v !== "string") {
     throw new Error(`expected string, got ${typeof v}`);
+  }
+  if (v.length > MAX_STRING_LENGTH) {
+    throw new Error(`string exceeds ${MAX_STRING_LENGTH} chars`);
   }
   return v;
 }
 
 function requireNumber(v: unknown): number {
-  if (typeof v !== "number") {
-    throw new Error(`expected number, got ${typeof v}`);
+  if (typeof v !== "number" || !Number.isFinite(v)) {
+    throw new Error(`expected finite number, got ${typeof v}`);
   }
   return v;
+}
+
+function requireInteger(v: unknown): number {
+  const n = requireNumber(v);
+  if (!Number.isInteger(n) || n < 0) {
+    throw new Error(`expected non-negative integer, got ${n}`);
+  }
+  return n;
+}
+
+function optionalString(v: unknown): string | null {
+  if (v === null || v === undefined) {
+    return null;
+  }
+  return requireString(v);
+}
+
+function optionalInteger(v: unknown): number | null {
+  if (v === null || v === undefined) {
+    return null;
+  }
+  return requireInteger(v);
 }
 
 function requireBoolean(v: unknown): boolean {

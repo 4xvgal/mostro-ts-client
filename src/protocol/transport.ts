@@ -12,6 +12,8 @@
 import { schnorr } from "@noble/curves/secp256k1.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { hex } from "@scure/base";
+import { verifyEvent } from "nostr-tools/pure";
+import type { NostrEvent } from "nostr-tools/core";
 import { v2 as nip44V2, encrypt as nip44Encrypt, decrypt as nip44Decrypt } from "nostr-tools/nip44";
 import { utf8Encoder, utf8Decoder } from "nostr-tools/utils";
 import { serializeMessage, messageToJson } from "./wire.js";
@@ -206,6 +208,8 @@ export function unwrapMessageNip44(params: {
     content: string;
   };
   receiverSecretHex: string;
+  /** Protocol paths set this: reject messages with no inner trade signature. */
+  requireSignature?: boolean;
 }): UnwrappedMessage | null {
   const { event, receiverSecretHex } = params;
 
@@ -238,6 +242,9 @@ export function unwrapMessageNip44(params: {
   // must be byte-identical to what the sender signed.
   const messageJson = JSON.stringify(messageObj);
 
+  if (params.requireSignature && typeof tradeSig !== "string") {
+    throw new Error("missing required trade signature");
+  }
   let signature: string | null = null;
   if (typeof tradeSig === "string") {
     if (!verifyMessageSignature(messageJson, event.pubkey, tradeSig)) {
@@ -269,6 +276,32 @@ export function unwrapMessageNip44(params: {
 export function pubkeyFromSecret(secretHex: string): string {
   const pub = schnorr.getPublicKey(hex.decode(secretHex));
   return hex.encode(pub);
+}
+
+/**
+ * Verify the outer Nostr event signature (id + schnorr sig). Callers receiving
+ * events from relays must run this before trusting `event.pubkey`; a relay or
+ * WebSocket peer can hand the client arbitrary unsigned/forged events.
+ * Returns false on any malformed input instead of throwing.
+ */
+export function verifyEventSignature(event: {
+  id?: string;
+  pubkey: string;
+  created_at: number;
+  kind: number;
+  tags: string[][];
+  content: string;
+  sig?: string;
+}): boolean {
+  const { id, sig } = event;
+  if (!id || !sig) {
+    return false;
+  }
+  try {
+    return verifyEvent(event as NostrEvent);
+  } catch {
+    return false;
+  }
 }
 
 export { utf8Encoder, utf8Decoder };

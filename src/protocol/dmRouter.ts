@@ -15,7 +15,12 @@ import type { NostrEvent, EventTemplate } from "nostr-tools/core";
 import type { Filter } from "nostr-tools/filter";
 import { hex } from "@scure/base";
 import { Transport, transportEventKind } from "./transport.js";
-import { unwrapMessageNip44, wrapMessageNip44, pubkeyFromSecret } from "./transport.js";
+import {
+  unwrapMessageNip44,
+  wrapMessageNip44,
+  pubkeyFromSecret,
+  verifyEventSignature,
+} from "./transport.js";
 import type { Message } from "./message.js";
 import { identityProofPayload } from "./proof.js";
 
@@ -204,6 +209,15 @@ export class DmRouter {
     if (event.kind !== transportEventKind(this.transport)) {
       return;
     }
+    // Outer event signature is mandatory: a relay or WebSocket peer can push
+    // arbitrary events, so never trust event.pubkey without verifying it.
+    if (!verifyEventSignature(event)) {
+      return;
+    }
+    // Enforce the Mostro author filter client-side too (not just in the filter).
+    if (event.pubkey !== this.mostroPubkeyHex) {
+      return;
+    }
     // Skip our own published request echo — the daemon reply is always a
     // different event id (covers self-addressed admin where author matches).
     if (this.ownOutboundIds.has(event.id)) {
@@ -276,6 +290,7 @@ function tryUnwrap(
     return unwrapMessageNip44({
       event: { kind: event.kind, pubkey: event.pubkey, content: event.content },
       receiverSecretHex: tradeSecretHex,
+      requireSignature: true,
     });
   } catch {
     return null;
@@ -322,6 +337,9 @@ export async function replayTradeDms(params: {
     const events = await pool.querySync(relays, filter);
     for (const event of events) {
       if (event.kind !== transportEventKind(transport)) {
+        continue;
+      }
+      if (!verifyEventSignature(event) || event.pubkey !== mostroPubkeyHex) {
         continue;
       }
       const unwrapped = tryUnwrap(event, tradeSecretHex);
