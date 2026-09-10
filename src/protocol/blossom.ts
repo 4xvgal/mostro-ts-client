@@ -7,6 +7,8 @@ import { randomBytes, sha256 } from "./crypto.js";
 import { hex } from "@scure/base";
 import type { EventTemplate } from "nostr-tools/core";
 import { finalizeEvent } from "nostr-tools/pure";
+import { assertSafeFetchUrl, fetchWithTimeout } from "./net.js";
+import type { UrlPolicy } from "./net.js";
 
 const NONCE_LEN = 12;
 const TAG_LEN = 16;
@@ -170,8 +172,11 @@ export async function uploadBlob(params: {
   tradeSecretHex: string;
   filename: string;
   mimeType: string;
+  /** Scheme/host policy for outbound requests (default: https only, no private hosts). */
+  policy?: UrlPolicy;
 }): Promise<string> {
   const { servers, blob, tradeSecretHex, filename, mimeType } = params;
+  const policy = params.policy ?? {};
   const hash = sha256Hex(blob);
   const signed = signAuthEvent(
     buildUploadAuthEvent({ tradeSecretHex, blob, filename, mimeType }).event,
@@ -183,7 +188,8 @@ export async function uploadBlob(params: {
     const base = raw.trim().replace(/\/+$/, "");
     if (!base) continue;
     try {
-      const res = await fetch(`${base}/upload`, {
+      assertSafeFetchUrl(`${base}/upload`, policy);
+      const res = await fetchWithTimeout(`${base}/upload`, {
         method: "PUT",
         headers: {
           Authorization: auth,
@@ -204,13 +210,51 @@ export async function uploadBlob(params: {
   throw lastErr ?? new Error("no Blossom server accepted the upload");
 }
 
-/** Download a blob from an HTTP(S) URL. */
-export async function downloadBlob(url: string): Promise<Uint8Array> {
-  const res = await fetch(url);
+export interface DownloadBlobOptions {
+  /** Reject larger payloads before reading the body into memory. Default 25 MB. */
+  maxBytes?: number;
+  /** Abort the request after this many ms. Default 15s. */
+  timeoutMs?: number;
+  /** Allowlist of Blossom host names (e.g. DEFAULT_BLOSSOM_SERVERS). */
+  allowedHosts?: readonly string[];
+  /** Scheme/host policy passed through to assertSafeFetchUrl. */
+  policy?: UrlPolicy;
+}
+
+/**
+ * Download a blob from a URL. Attachment URLs are counterparty-controlled, so
+ * this enforces https, blocks private hosts, an optional host allowlist, a size
+ * cap and a timeout.
+ */
+export async function downloadBlob(url: string, opts: DownloadBlobOptions = {}): Promise<Uint8Array> {
+  const maxBytes = opts.maxBytes ?? MAX_ATTACHMENT_BYTES;
+  const parsed = assertSafeFetchUrl(url, opts.policy ?? {});
+  if (opts.allowedHosts && opts.allowedHosts.length > 0) {
+    const host = parsed.hostname.toLowerCase();
+    const allowed = opts.allowedHosts.some((h) => {
+      try {
+        return new URL(h).hostname.toLowerCase() === host;
+      } catch {
+        return h.toLowerCase() === host;
+      }
+    });
+    if (!allowed) {
+      throw new Error(`blob host not in allowlist: ${parsed.hostname}`);
+    }
+  }
+  const res = await fetchWithTimeout(parsed.toString(), {}, opts.timeoutMs ?? 15_000);
   if (!res.ok) {
     throw new Error(`Blossom download returned ${res.status}`);
   }
-  return new Uint8Array(await res.arrayBuffer());
+  const declared = Number(res.headers.get("content-length") ?? "");
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    throw new Error(`blob exceeds ${maxBytes} bytes (content-length ${declared})`);
+  }
+  const buf = new Uint8Array(await res.arrayBuffer());
+  if (buf.length > maxBytes) {
+    throw new Error(`blob exceeds ${maxBytes} bytes`);
+  }
+  return buf;
 }
 
 export { randomBytes, sha256, hex };

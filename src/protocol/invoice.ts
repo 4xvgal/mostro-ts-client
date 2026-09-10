@@ -31,18 +31,115 @@ export function classifyInvoice(input: string): InvoiceKind | null {
 }
 
 /**
- * Basic bolt11 validation: must start with a bolt11 prefix and decode length.
- * Full signature/amount checks belong to a real bolt11 parser — this only
- * rejects obviously-invalid strings (matches mostrix is_valid_invoice's
- * "reject garbage" role in a TS setting).
+ * Basic bolt11 validation: must match the HRP shape and have a plausible size.
+ * Amount/expiry are read by bolt11AmountMsat / invoiceExpired below; full
+ * signature checks still belong to a real bolt11 parser.
  */
 export function isProbablyValidBolt11(paymentRequest: string): boolean {
   const trimmed = paymentRequest.trim();
-  return /^(lnbc|lntb|lnbcrt)[0-9a-z]+$/.test(trimmed) && trimmed.length > 20;
+  return /^ln(bc|tb|bcrt|sb)[0-9a-z]+$/i.test(trimmed) && trimmed.length > 20;
 }
 
-/** Expiry check placeholder: real check needs a bolt11 parser. Returns null (unknown). */
-export function invoiceExpired(_paymentRequest: string): boolean | null {
+const BOLT11_HRP = /^ln(?:bc|tb|bcrt|sb)(\d*)([munp]?)1/i;
+const BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+const BOLT11_SIG_CHARS = 104;
+
+/**
+ * Decode the amount encoded in a bolt11 invoice's human-readable part.
+ * Returns millisatoshis, or null for an amountless/invalid invoice.
+ */
+export function bolt11AmountMsat(paymentRequest: string): number | null {
+  const m = BOLT11_HRP.exec(paymentRequest.trim().toLowerCase());
+  if (!m || m[1] === "") {
+    return null;
+  }
+  const amount = Number(m[1]);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return null;
+  }
+  switch (m[2]) {
+    case "":
+      return Math.round(amount * 1e11);
+    case "m":
+      return Math.round(amount * 1e8);
+    case "u":
+      return Math.round(amount * 1e5);
+    case "n":
+      return Math.round(amount * 1e2);
+    case "p":
+      return Math.round(amount * 0.1);
+    default:
+      return null;
+  }
+}
+
+/** Decode the 35-bit creation timestamp from a bolt11 invoice, or null. */
+export function bolt11Timestamp(paymentRequest: string): number | null {
+  const s = paymentRequest.trim().toLowerCase();
+  const m = BOLT11_HRP.exec(s);
+  if (!m) {
+    return null;
+  }
+  const data = s.slice(m[0].length);
+  if (data.length < 7) {
+    return null;
+  }
+  let acc = 0;
+  for (let i = 0; i < 7; i++) {
+    const v = BECH32_CHARSET.indexOf(data[i]!);
+    if (v < 0) {
+      return null;
+    }
+    acc = acc * 32 + v;
+  }
+  return acc;
+}
+
+/** Best-effort expiry check using the `x` tag, defaulting to 3600s. */
+export function invoiceExpired(
+  paymentRequest: string,
+  now = Math.floor(Date.now() / 1000),
+): boolean | null {
+  const ts = bolt11Timestamp(paymentRequest);
+  if (ts === null) {
+    return null;
+  }
+  return now > ts + (bolt11ExpirySeconds(paymentRequest) ?? 3600);
+}
+
+function bolt11ExpirySeconds(paymentRequest: string): number | null {
+  const s = paymentRequest.trim().toLowerCase();
+  const m = BOLT11_HRP.exec(s);
+  if (!m) {
+    return null;
+  }
+  const data = s.slice(m[0].length);
+  const end = data.length - BOLT11_SIG_CHARS;
+  let pos = 7;
+  while (pos + 3 <= end) {
+    const tag = BECH32_CHARSET.indexOf(data[pos]!);
+    const len = BECH32_CHARSET.indexOf(data[pos + 1]!) * 32 + BECH32_CHARSET.indexOf(data[pos + 2]!);
+    if (tag < 0 || len < 0) {
+      return null;
+    }
+    const start = pos + 3;
+    const stop = start + len;
+    if (stop > end) {
+      return null;
+    }
+    if (tag === BECH32_CHARSET.indexOf("x")) {
+      let acc = 0;
+      for (let i = start; i < stop; i++) {
+        const v = BECH32_CHARSET.indexOf(data[i]!);
+        if (v < 0) {
+          return null;
+        }
+        acc = acc * 32 + v;
+      }
+      return acc;
+    }
+    pos = stop;
+  }
   return null;
 }
 

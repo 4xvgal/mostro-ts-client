@@ -626,7 +626,8 @@ export class MostroClient {
       throw new Error(`no counterpart trade key known yet for order ${orderId}`);
     }
     const shared = generateSharedKey(peer.secret, peer.pubkey);
-    const blob = await downloadBlob(attachment.blossom_url);
+    const servers = this.opts.blossomServers ?? DEFAULT_BLOSSOM_SERVERS;
+    const blob = await downloadBlob(attachment.blossom_url, { allowedHosts: servers });
     return decryptBlob(shared, blob);
   }
 

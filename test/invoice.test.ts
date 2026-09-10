@@ -9,6 +9,8 @@ import {
   handleAddInvoiceResponse,
   handleAddBondInvoiceResponse,
   handleTakeOrderResponse,
+  bolt11AmountMsat,
+  bolt11Timestamp,
 } from "../src/protocol/index.js";
 import type { MessageKind } from "../src/protocol/index.js";
 
@@ -62,6 +64,30 @@ test("buildInvoiceMessage builds verified AddInvoice", () => {
       }),
     /Invalid invoice/,
   );
+});
+
+test("bolt11AmountMsat decodes multipliers", () => {
+  assert.equal(bolt11AmountMsat("lnbc11qqq"), 1e11); // 1 BTC
+  assert.equal(bolt11AmountMsat("lnbc2500u1qqq"), 250_000_000); // 2500 µBTC
+  assert.equal(bolt11AmountMsat("lnbc1m1qqq"), 100_000_000); // 1 mBTC
+  assert.equal(bolt11AmountMsat("lnbc2500n1qqq"), 250_000); // 2500 nBTC
+  assert.equal(bolt11AmountMsat("lnbcrt78510n1pj59wmepp50677g"), 7_851_000);
+  assert.equal(bolt11AmountMsat("lnbc1qqq"), null); // amountless
+  assert.equal(bolt11AmountMsat("garbage"), null);
+});
+
+test("bolt11Timestamp decodes the 7-char base32 timestamp", () => {
+  const charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+  const encode7 = (n: number): string => {
+    let s = "";
+    for (let i = 6; i >= 0; i--) {
+      s += charset[(n >> (5 * i)) & 31];
+    }
+    return s;
+  };
+  const ts = 1_700_000_000;
+  assert.equal(bolt11Timestamp("lnbc1" + encode7(ts)), ts);
+  assert.equal(bolt11Timestamp("nope"), null);
 });
 
 test("handleAddInvoiceResponse accepts expected acks only", () => {

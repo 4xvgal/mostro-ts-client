@@ -244,6 +244,8 @@ export {
   classifyInvoice,
   isProbablyValidBolt11,
   invoiceExpired,
+  bolt11AmountMsat,
+  bolt11Timestamp,
   invoicePayload,
   buildInvoiceMessage,
   handleAddInvoiceResponse,
