@@ -254,6 +254,15 @@ export type { InvoiceKind } from "./invoice.js";
 export { restoreSession, fetchLastTradeIndex } from "./restore.js";
 export type { RestoreSummary, LastTradeIndexInfo } from "./restore.js";
 
+export {
+  lazyPassphraseEncryptor,
+  rawKeyEncryptor,
+  isEncryptedFormat,
+  encryptStringOrNull,
+  decryptStringOrNull,
+} from "./encryption.js";
+export type { FieldEncryptor } from "./encryption.js";
+
 export { MostroClient } from "./client.js";
 export type {
   MostroClientOptions,

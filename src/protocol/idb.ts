@@ -8,6 +8,13 @@
 
 import { deriveTradeKeys } from "./keys.js";
 import type { Store, UserRow, OrderRow, SaveOrderInput, ReservedTradeIndex, ChatMessageRow } from "./store.js";
+import {
+  decryptString,
+  decryptStringOrNull,
+  encryptString,
+  encryptStringOrNull,
+} from "./encryption.js";
+import type { FieldEncryptor } from "./encryption.js";
 
 const STORE_USERS = "users";
 const STORE_ORDERS = "orders";
@@ -94,7 +101,8 @@ function txn<T>(
 }
 
 /** Open (or create) the IndexedDB-backed store. */
-export function openIndexedDbStore(opts: { dbName?: string } = {}): Store {
+export function openIndexedDbStore(opts: { dbName?: string; encryptor?: FieldEncryptor } = {}): Store {
+  const encryptor = opts.encryptor;
   const dbName = opts.dbName ?? "mostro";
   let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -105,10 +113,32 @@ export function openIndexedDbStore(opts: { dbName?: string } = {}): Store {
     return dbPromise;
   };
 
+  const decryptUser = async (row: UserRow | null): Promise<UserRow | null> => {
+    if (!row?.mnemonic) {
+      return row;
+    }
+    const mnemonic = await decryptString(encryptor, row.mnemonic);
+    return { ...row, mnemonic };
+  };
+
+  const decryptOrder = async (row: OrderRow | null): Promise<OrderRow | null> => {
+    if (!row) {
+      return row;
+    }
+    const [trade_keys, dispute_chat_shared_key_hex] = await Promise.all([
+      row.trade_keys ? decryptString(encryptor, row.trade_keys) : Promise.resolve(row.trade_keys),
+      row.dispute_chat_shared_key_hex
+        ? decryptStringOrNull(encryptor, row.dispute_chat_shared_key_hex)
+        : Promise.resolve(row.dispute_chat_shared_key_hex),
+    ]);
+    return { ...row, trade_keys, dispute_chat_shared_key_hex };
+  };
+
   const getUser = async (): Promise<UserRow | null> => {
     const database = await db();
     const all = await txn<UserRow[]>(database, STORE_USERS, "readonly", (s) => s.getAll());
-    return all && all.length > 0 ? all[0]! : null;
+    const row = all && all.length > 0 ? all[0]! : null;
+    return decryptUser(row);
   };
 
   const upsertUser = async (user: UserRow): Promise<void> => {
@@ -122,7 +152,8 @@ export function openIndexedDbStore(opts: { dbName?: string } = {}): Store {
             last_trade_index: Math.max(existing.last_trade_index, user.last_trade_index),
           }
         : user;
-    await txn(database, STORE_USERS, "readwrite", (s) => s.put(row));
+    const stored = row.mnemonic ? { ...row, mnemonic: await encryptString(encryptor, row.mnemonic) } : row;
+    await txn(database, STORE_USERS, "readwrite", (s) => s.put(stored));
   };
 
   return {
@@ -162,7 +193,7 @@ export function openIndexedDbStore(opts: { dbName?: string } = {}): Store {
         fiat_amount: order.fiat_amount,
         payment_method: order.payment_method,
         premium: order.premium,
-        trade_keys: order.trade_keys,
+        trade_keys: await encryptString(encryptor, order.trade_keys),
         counterparty_pubkey: order.counterparty_pubkey,
         is_mine: order.is_mine ? 1 : 0,
         buyer_invoice: order.buyer_invoice,
@@ -190,18 +221,20 @@ export function openIndexedDbStore(opts: { dbName?: string } = {}): Store {
     async getOrder(orderId: string): Promise<OrderRow | null> {
       const database = await db();
       const row = await txn<OrdersDb>(database, STORE_ORDERS, "readonly", (s) => s.get(orderId));
-      return row ? (row as unknown as OrderRow) : null;
+      return decryptOrder(row ? (row as unknown as OrderRow) : null);
     },
 
     async getActiveOrders(terminalStatuses: readonly string[]): Promise<OrderRow[]> {
       const database = await db();
       const rows = (await txn<OrdersDb[]>(database, STORE_ORDERS, "readonly", (s) => s.getAll())) ?? [];
-      return rows.filter(
+      const filtered = rows.filter(
         (r) =>
           r.trade_keys !== null &&
           r.trade_keys !== "" &&
           (r.status === null || !terminalStatuses.includes(r.status.toLowerCase())),
       ) as unknown as OrderRow[];
+      const decrypted = await Promise.all(filtered.map((r) => decryptOrder(r)));
+      return decrypted.filter((r): r is OrderRow => r !== null);
     },
 
     async updateLastSeenDmTs(orderId: string, ts: number): Promise<void> {
@@ -227,8 +260,9 @@ export function openIndexedDbStore(opts: { dbName?: string } = {}): Store {
       const database = await db();
       const existing = await txn<OrdersDb>(database, STORE_ORDERS, "readonly", (s) => s.get(orderId));
       if (existing) {
+        const encrypted = await encryptStringOrNull(encryptor, sharedKeyHex);
         await txn(database, STORE_ORDERS, "readwrite", (s) =>
-          s.put({ ...existing, solver_pubkey: solverPubkey, dispute_chat_shared_key_hex: sharedKeyHex }),
+          s.put({ ...existing, solver_pubkey: solverPubkey, dispute_chat_shared_key_hex: encrypted }),
         );
       }
     },

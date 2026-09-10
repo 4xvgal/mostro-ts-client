@@ -1,8 +1,19 @@
 // Shared SQLite Store factory. Each runtime backend (node:sqlite, bun:sqlite)
 // supplies its own `open(path) -> SqlDatabase`; the rest is identical.
+//
+// Sensitive columns (users.mnemonic, orders.trade_keys, orders.dispute_chat_shared_key_hex)
+// go through the optional FieldEncryptor. Plaintext rows stay readable when no
+// passphrase is supplied; encrypted rows decrypt only when the right passphrase is open.
 
 import { deriveTradeKeys } from "./keys.js";
 import type { Store, UserRow, OrderRow, SaveOrderInput, ReservedTradeIndex } from "./store.js";
+import {
+  decryptString,
+  decryptStringOrNull,
+  encryptString,
+  encryptStringOrNull,
+} from "./encryption.js";
+import type { FieldEncryptor } from "./encryption.js";
 
 /** The minimal SQL surface node:sqlite and bun:sqlite share. */
 export interface SqlDatabase {
@@ -89,14 +100,41 @@ export const SCHEMA_SQL = `
 `;
 
 /** Build a Store backed by a SQLite-like database opened per path. */
-export function createSqliteStore(open: (path: string) => SqlDatabase): (path?: string) => Store {
-  return (path = ":memory:"): Store => {
+export function createSqliteStore(
+  open: (path: string) => SqlDatabase,
+): (path?: string, opts?: { encryptor?: FieldEncryptor }) => Store {
+  return (path = ":memory:", opts?: { encryptor?: FieldEncryptor }): Store => {
+    const encryptor = opts?.encryptor;
     const db = open(path);
     db.exec("PRAGMA journal_mode = WAL;");
     db.exec(SCHEMA_SQL);
 
+    const mnemonicDecrypt = (row: UserRow | null): Promise<UserRow | null> => {
+      if (!row?.mnemonic) {
+        return Promise.resolve(row);
+      }
+      return decryptString(encryptor, row.mnemonic).then((mnemonic) => ({ ...row, mnemonic }));
+    };
+
+    const orderDecrypt = (row: OrderRow | null): Promise<OrderRow | null> => {
+      if (!row) {
+        return Promise.resolve(row);
+      }
+      return Promise.all([
+        row.trade_keys ? Promise.resolve(decryptString(encryptor, row.trade_keys)) : Promise.resolve(row.trade_keys),
+        row.dispute_chat_shared_key_hex
+          ? Promise.resolve(decryptStringOrNull(encryptor, row.dispute_chat_shared_key_hex))
+          : Promise.resolve(row.dispute_chat_shared_key_hex),
+      ]).then(([trade_keys, dispute_chat_shared_key_hex]) => ({
+        ...row,
+        trade_keys,
+        dispute_chat_shared_key_hex,
+      }));
+    };
+
     return {
       async upsertUser(user: UserRow): Promise<void> {
+        const mnemonic = user.mnemonic ? await encryptString(encryptor, user.mnemonic) : user.mnemonic;
         db.prepare(
           `INSERT INTO users (i0_pubkey, mnemonic, last_trade_index, created_at)
            VALUES (?, ?, ?, ?)
@@ -104,14 +142,14 @@ export function createSqliteStore(open: (path: string) => SqlDatabase): (path?: 
              mnemonic = excluded.mnemonic,
              last_trade_index = MAX(COALESCE(users.last_trade_index, 0), COALESCE(excluded.last_trade_index, 0)),
              created_at = excluded.created_at`,
-        ).run(user.i0_pubkey, user.mnemonic, user.last_trade_index, user.created_at);
+        ).run(user.i0_pubkey, mnemonic, user.last_trade_index, user.created_at);
       },
 
       async getUser(): Promise<UserRow | null> {
         const row = db
           .prepare(`SELECT i0_pubkey, mnemonic, last_trade_index, created_at FROM users LIMIT 1`)
           .get() as Record<string, unknown> | undefined;
-        return row ? (row as unknown as UserRow) : null;
+        return mnemonicDecrypt(row ? (row as unknown as UserRow) : null);
       },
 
       async reserveNextTradeIndex(mnemonic: string, noneBase: number): Promise<ReservedTradeIndex> {
@@ -129,6 +167,7 @@ export function createSqliteStore(open: (path: string) => SqlDatabase): (path?: 
         const existing = db
           .prepare(`SELECT id FROM orders WHERE id = ? LIMIT 1`)
           .get(order.id) as Record<string, unknown> | undefined;
+        const trade_keys = await encryptString(encryptor, order.trade_keys);
         db.prepare(
           `INSERT INTO orders (id, kind, status, amount, fiat_code, min_amount, max_amount,
              fiat_amount, payment_method, premium, trade_keys, counterparty_pubkey, is_mine,
@@ -155,7 +194,7 @@ export function createSqliteStore(open: (path: string) => SqlDatabase): (path?: 
           order.fiat_amount,
           order.payment_method,
           order.premium,
-          order.trade_keys,
+          trade_keys,
           order.counterparty_pubkey,
           order.is_mine ? 1 : 0,
           order.buyer_invoice,
@@ -175,7 +214,7 @@ export function createSqliteStore(open: (path: string) => SqlDatabase): (path?: 
         const row = db.prepare(`SELECT * FROM orders WHERE id = ? LIMIT 1`).get(orderId) as
           | Record<string, unknown>
           | undefined;
-        return row ? (row as unknown as OrderRow) : null;
+        return orderDecrypt(row ? (row as unknown as OrderRow) : null);
       },
 
       async getActiveOrders(terminalStatuses: readonly string[]): Promise<OrderRow[]> {
@@ -187,7 +226,9 @@ export function createSqliteStore(open: (path: string) => SqlDatabase): (path?: 
                AND (status IS NULL OR lower(status) NOT IN (${placeholders}))`,
           )
           .all(...terminalStatuses) as unknown as Record<string, unknown>[];
-        return rows.map((r) => r as unknown as OrderRow);
+        return Promise.all(rows.map((r) => orderDecrypt(r as unknown as OrderRow))).then(
+          (arr) => arr.filter((r): r is OrderRow => r !== null),
+        );
       },
 
       async updateLastSeenDmTs(orderId: string, ts: number): Promise<void> {
@@ -203,9 +244,10 @@ export function createSqliteStore(open: (path: string) => SqlDatabase): (path?: 
       },
 
       async updateSolverChat(orderId: string, solverPubkey: string, sharedKeyHex: string): Promise<void> {
+        const encrypted = await encryptStringOrNull(encryptor, sharedKeyHex);
         db.prepare(
           `UPDATE orders SET solver_pubkey = ?, dispute_chat_shared_key_hex = ? WHERE id = ?`,
-        ).run(solverPubkey, sharedKeyHex, orderId);
+        ).run(solverPubkey, encrypted, orderId);
       },
 
       async saveChatMessage(row): Promise<void> {
