@@ -9,7 +9,7 @@ import { SimplePool } from "nostr-tools/pool";
 import type { NostrEvent } from "nostr-tools/core";
 import type { Message, MessageKind } from "./message.js";
 import type { SmallOrder } from "./order.js";
-import { deriveIdentityKeys, deriveTradeKeys } from "./keys.js";
+import { deriveIdentityKeys } from "./keys.js";
 import type { Store, UserRow } from "./store.js";
 import { DmRouter, sendDm, FETCH_EVENTS_TIMEOUT_MS } from "./dmRouter.js";
 import { unwrapMessageNip44 } from "./transport.js";
@@ -18,6 +18,7 @@ import { applyTradeDm } from "./applicator.js";
 import { restoreSession } from "./restore.js";
 import { buildNewOrder, buildTradeMessage, buildTakeOrderPayload, takeActionForOrder, newRequestId, handleNewOrderResponse, handleTakeOrderResponse, buildDisputeMessage } from "./flow.js";
 import { buildInvoiceMessage, handleAddInvoiceResponse } from "./invoice.js";
+import { buildRateUserMessage, handleRateUserResponse } from "./flow.js";
 import { mostroInfoFromTags } from "./mostroInfo.js";
 import type { MostroInstanceInfo } from "./mostroInfo.js";
 import { NOSTR_INFO_EVENT_KIND } from "./constants.js";
@@ -92,11 +93,12 @@ export class MostroClient {
   private messageHistory = new Map<string, Array<{ timestamp: number; message: Message }>>();
   /** order_id → callback when a new DM arrives for that order. */
   private messageHandlers = new Map<string, (dm: { timestamp: number; message: Message }) => void>();
+  /** Global inbound-DM callback (any order), for invoice extraction UIs. */
+  private anyMessageHandler: ((orderId: string, dm: { timestamp: number; message: Message }) => void) | null = null;
 
   // Identity/trade keys derived from the mnemonic.
   private identitySecret: string;
   private identityPubkey: string;
-  private lastTradeIndex = 0;
 
   constructor(opts: MostroClientOptions) {
     this.opts = opts;
@@ -193,6 +195,11 @@ export class MostroClient {
     this.messageHandlers.set(orderId, handler);
   }
 
+  /** Subscribe to inbound DMs for every order (e.g. to surface payment requests). */
+  onAnyMessage(handler: (orderId: string, dm: { timestamp: number; message: Message }) => void): void {
+    this.anyMessageHandler = handler;
+  }
+
   /** The inbound DM timeline for an order (chronological). */
   getMessages(orderId: string): Array<{ timestamp: number; message: Message }> {
     return this.messageHistory.get(orderId) ?? [];
@@ -209,6 +216,7 @@ export class MostroClient {
       timestamp,
       message,
     });
+    this.anyMessageHandler?.(orderId, { timestamp, message });
   }
 
   /** Register an event id we published (own outbound request). */
@@ -249,11 +257,13 @@ export class MostroClient {
     maxAmount?: number;
     expirationDays?: number;
   }): Promise<CreateOrderResult> {
-    const tradeIndex = ++this.lastTradeIndex;
-    const tradeKeys = deriveTradeKeys(this.opts.mnemonic, tradeIndex);
+    const { nextIndex: tradeIndex, keys: tradeKeys } = await this.store.reserveNextTradeIndex(
+      this.opts.mnemonic,
+      1,
+    );
 
     const { message, requestId } = buildNewOrder(
-      { lastTradeIndex: this.lastTradeIndex - 1 },
+      { lastTradeIndex: tradeIndex - 1 },
       {
         kind: input.kind,
         fiatAmount: input.fiatAmount,
@@ -299,8 +309,10 @@ export class MostroClient {
 
   /** Take an order; resolves to the next UI step (invoice needed, etc.). */
   async takeOrder(order: SmallOrder, input: { invoice?: string; amount?: number } = {}): Promise<TakeOrderResult> {
-    const tradeIndex = ++this.lastTradeIndex;
-    const tradeKeys = deriveTradeKeys(this.opts.mnemonic, tradeIndex);
+    const { nextIndex: tradeIndex, keys: tradeKeys } = await this.store.reserveNextTradeIndex(
+      this.opts.mnemonic,
+      1,
+    );
     const action = takeActionForOrder(order);
     const payload = buildTakeOrderPayload({
       action,
@@ -363,13 +375,23 @@ export class MostroClient {
     await this.roundtrip(tradeSecret, message, "dispute-initiated-by-you", "dispute-initiated-by-peer");
   }
 
+  /** Rate the counterpart of a completed trade (1..=5). */
+  async rateUser(orderId: string, rating: number): Promise<void> {
+    const tradeSecret = this.requireTradeSecret(orderId);
+    const requestId = newRequestId();
+    const message = buildRateUserMessage({ orderId, requestId, rating });
+    const reply = await this.roundtrip(tradeSecret, message, "rate-received");
+    handleRateUserResponse(reply, requestId);
+  }
+
   /** Restore session state from Mostro (rebuilds store + trade routing). */
   async restore(): Promise<void> {
+    const existing = await this.store.getUser();
     await this.store.upsertUser({
       i0_pubkey: this.identityPubkey,
       mnemonic: this.opts.mnemonic,
-      last_trade_index: this.lastTradeIndex,
-      created_at: Math.floor(Date.now() / 1000),
+      last_trade_index: existing?.last_trade_index ?? 0,
+      created_at: existing?.created_at ?? Math.floor(Date.now() / 1000),
     });
     await restoreSession({
       pool: this.pool,
