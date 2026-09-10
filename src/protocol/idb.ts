@@ -6,7 +6,7 @@
 // reservation is atomic within a tab because a single JS thread serializes
 // the read-modify-write (no interleaved reservations between awaits).
 
-import { deriveTradeKeys } from "./keys.js";
+import { deriveKeysFromSeed } from "./keys.js";
 import type { Store, UserRow, OrderRow, SaveOrderInput, ReservedTradeIndex, ChatMessageRow } from "./store.js";
 import {
   decryptString,
@@ -113,14 +113,6 @@ export function openIndexedDbStore(opts: { dbName?: string; encryptor?: FieldEnc
     return dbPromise;
   };
 
-  const decryptUser = async (row: UserRow | null): Promise<UserRow | null> => {
-    if (!row?.mnemonic) {
-      return row;
-    }
-    const mnemonic = await decryptString(encryptor, row.mnemonic);
-    return { ...row, mnemonic };
-  };
-
   const decryptOrder = async (row: OrderRow | null): Promise<OrderRow | null> => {
     if (!row) {
       return row;
@@ -138,7 +130,7 @@ export function openIndexedDbStore(opts: { dbName?: string; encryptor?: FieldEnc
     const database = await db();
     const all = await txn<UserRow[]>(database, STORE_USERS, "readonly", (s) => s.getAll());
     const row = all && all.length > 0 ? all[0]! : null;
-    return decryptUser(row);
+    return row;
   };
 
   const upsertUser = async (user: UserRow): Promise<void> => {
@@ -152,8 +144,7 @@ export function openIndexedDbStore(opts: { dbName?: string; encryptor?: FieldEnc
             last_trade_index: Math.max(existing.last_trade_index, user.last_trade_index),
           }
         : user;
-    const stored = row.mnemonic ? { ...row, mnemonic: await encryptString(encryptor, row.mnemonic) } : row;
-    await txn(database, STORE_USERS, "readwrite", (s) => s.put(stored));
+    await txn(database, STORE_USERS, "readwrite", (s) => s.put(row));
   };
 
   return {
@@ -161,22 +152,21 @@ export function openIndexedDbStore(opts: { dbName?: string; encryptor?: FieldEnc
 
     getUser,
 
-    async reserveNextTradeIndex(mnemonic: string, noneBase: number): Promise<ReservedTradeIndex> {
+    async reserveNextTradeIndex(seed: Uint8Array, noneBase: number): Promise<ReservedTradeIndex> {
       // Single JS thread: no interleaved reservations between awaits.
       const user = await getUser();
       const nextIndex = (user?.last_trade_index ?? noneBase) + 1;
       if (user) {
         await upsertUser({ ...user, last_trade_index: nextIndex });
       } else {
-        const identity = deriveTradeKeys(mnemonic, 0);
+        const identity = deriveKeysFromSeed(seed, 0);
         await upsertUser({
           i0_pubkey: identity.pubkey,
-          mnemonic,
           last_trade_index: nextIndex,
           created_at: Math.floor(Date.now() / 1000),
         });
       }
-      return { nextIndex, keys: deriveTradeKeys(mnemonic, nextIndex) };
+      return { nextIndex, keys: deriveKeysFromSeed(seed, nextIndex) };
     },
 
     async saveOrder(order: SaveOrderInput): Promise<{ inserted: boolean }> {

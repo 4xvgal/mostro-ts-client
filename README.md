@@ -13,12 +13,12 @@ npm install mostro-ts-client
 ## Quick start (Node)
 
 ```ts
-import { MostroClient } from "mostro-ts-client";
+import { MostroClient, mnemonicToSeed } from "mostro-ts-client";
 import { openNodeSqliteStore } from "mostro-ts-client/node";
 
 const client = new MostroClient({
-  mnemonic,                    // BIP-39 seed
-  mostroPubkey,                // instance pubkey (hex)
+  seed: mnemonicToSeed(mnemonic), // BIP-39 seed; client never sees the words
+  mostroPubkey,                   // instance pubkey (hex)
   relays: ["wss://relay.example"],
   store: openNodeSqliteStore("./mostro.db"),
 });
@@ -37,11 +37,11 @@ await client.stop();
 ## Browser / React
 
 ```ts
-import { MostroClient } from "mostro-ts-client";
+import { MostroClient, mnemonicToSeed } from "mostro-ts-client";
 import { openIndexedDbStore } from "mostro-ts-client/browser";
 
 const client = new MostroClient({
-  mnemonic,
+  seed: mnemonicToSeed(mnemonic),
   mostroPubkey,
   relays,
   store: openIndexedDbStore({ dbName: "mostro" }), // optional { encryptor }

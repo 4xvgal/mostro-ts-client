@@ -9,7 +9,7 @@ import { SimplePool } from "nostr-tools/pool";
 import type { NostrEvent } from "nostr-tools/core";
 import type { Message, MessageKind, Payload } from "./message.js";
 import type { SmallOrder } from "./order.js";
-import { deriveIdentityKeys } from "./keys.js";
+import { deriveKeysFromSeed } from "./keys.js";
 import type { Store, UserRow } from "./store.js";
 import { DmRouter, sendDm, FETCH_EVENTS_TIMEOUT_MS } from "./dmRouter.js";
 import { unwrapMessageNip44, pubkeyFromSecret } from "./transport.js";
@@ -37,8 +37,12 @@ import type { MostroInstanceInfo } from "./mostroInfo.js";
 import { NOSTR_INFO_EVENT_KIND } from "./constants.js";
 
 export interface MostroClientOptions {
-  /** BIP-39 mnemonic; derives identity + trade keys. */
-  mnemonic: string;
+  /**
+   * BIP-39 seed (from `mnemonicToSeed(mnemonic)`). Derives identity + trade
+   * keys. The client never receives or persists the mnemonic itself — the
+   * embedding app owns it (for backup) and supplies the seed.
+   */
+  seed: Uint8Array;
   /** The Mostro instance pubkey (hex). */
   mostroPubkey: string;
   /** Nostr relay URLs. */
@@ -97,7 +101,7 @@ export interface TakeOrderResult {
  * MostroClient — the UI-facing entry point.
  *
  * Usage:
- *   const client = new MostroClient({ mnemonic, mostroPubkey, relays });
+ *   const client = new MostroClient({ seed, mostroPubkey, relays, store });
  *   await client.start();
  *   client.onOrders((orders) => renderBook(orders));
  *   client.onTrade((id, state) => renderTrade(id, state));
@@ -136,7 +140,7 @@ export class MostroClient {
   /** Dedupe: outer chat event id → recorded. */
   private chatSeen = new Set<string>();
 
-  // Identity/trade keys derived from the mnemonic.
+  // Identity/trade keys derived from the seed.
   private identitySecret: string;
   private identityPubkey: string;
 
@@ -144,7 +148,7 @@ export class MostroClient {
     this.opts = opts;
     this.pool = new SimplePool();
     this.store = opts.store;
-    const identity = deriveIdentityKeys(opts.mnemonic);
+    const identity = deriveKeysFromSeed(opts.seed, 0);
     this.identitySecret = identity.secret;
     this.identityPubkey = identity.pubkey;
   }
@@ -316,7 +320,7 @@ export class MostroClient {
     premium?: number;
   }): Promise<CreateOrderResult> {
     const { nextIndex: tradeIndex, keys: tradeKeys } = await this.store.reserveNextTradeIndex(
-      this.opts.mnemonic,
+      this.opts.seed,
       1,
     );
 
@@ -358,7 +362,6 @@ export class MostroClient {
     await this.persistOrder(orderId, kind, tradeKeys.secret, tradeIndex, true);
     await this.store.upsertUser({
       i0_pubkey: this.identityPubkey,
-      mnemonic: this.opts.mnemonic,
       last_trade_index: tradeIndex,
       created_at: Math.floor(Date.now() / 1000),
     });
@@ -369,7 +372,7 @@ export class MostroClient {
   /** Take an order; resolves to the next UI step (invoice needed, etc.). */
   async takeOrder(order: SmallOrder, input: { invoice?: string; amount?: number } = {}): Promise<TakeOrderResult> {
     const { nextIndex: tradeIndex, keys: tradeKeys } = await this.store.reserveNextTradeIndex(
-      this.opts.mnemonic,
+      this.opts.seed,
       1,
     );
     const action = takeActionForOrder(order);
@@ -436,7 +439,7 @@ export class MostroClient {
           // computeNextTradePayload only reads the range fields above.
         } as unknown as import("./order.js").SmallOrder,
         reserveNext: async (noneBase) => {
-          const r = await this.store.reserveNextTradeIndex(this.opts.mnemonic, noneBase);
+          const r = await this.store.reserveNextTradeIndex(this.opts.seed, noneBase);
           return { nextIndex: r.nextIndex, keys: { pubkey: r.keys.pubkey } };
         },
       });
@@ -462,7 +465,7 @@ export class MostroClient {
     );
   }
 
-  /** The stored user row (identity pubkey, mnemonic, last trade index). */
+  /** The stored user row (identity pubkey, last trade index). */
   async getUser(): Promise<UserRow | null> {
     return this.store.getUser();
   }
@@ -788,7 +791,6 @@ export class MostroClient {
     const existing = await this.store.getUser();
     await this.store.upsertUser({
       i0_pubkey: this.identityPubkey,
-      mnemonic: this.opts.mnemonic,
       last_trade_index: existing?.last_trade_index ?? 0,
       created_at: existing?.created_at ?? Math.floor(Date.now() / 1000),
     });
@@ -796,7 +798,7 @@ export class MostroClient {
       pool: this.pool,
       relays: this.opts.relays,
       mostroPubkeyHex: this.opts.mostroPubkey,
-      mnemonic: this.opts.mnemonic,
+      seed: this.opts.seed,
       store: this.store,
     });
     // Re-track restored active orders.

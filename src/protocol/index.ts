@@ -28,6 +28,8 @@ export type { Rating, User, UserInfo as UserInfoFromUser } from "./user.js";
 
 export {
   deriveKeysFromMnemonic,
+  deriveKeysFromSeed,
+  mnemonicToSeed,
   deriveIdentityKeys,
   deriveTradeKeys,
   reserveNextTradeIndex,

@@ -4,10 +4,12 @@
 // ({ test, assert }) so this file stays runner-agnostic.
 
 import type { Store } from "../src/protocol/store.js";
-import { TERMINAL_DM_STATUSES } from "../src/protocol/index.js";
+import { TERMINAL_DM_STATUSES, mnemonicToSeed } from "../src/protocol/index.js";
 
 export const MNEMONIC =
   "leader monkey parrot ring guide accident before fence cannon height naive bean";
+
+export const SEED = mnemonicToSeed(MNEMONIC);
 
 type Runner = {
   test: (name: string, fn: () => Promise<void> | void) => void;
@@ -46,16 +48,16 @@ export function storageContract(runner: Runner, open: () => Store): void {
 
   test("users: upsert, get, atomic index reservation", async () => {
     const store = open();
-    await store.upsertUser({ i0_pubkey: "abc", mnemonic: MNEMONIC, last_trade_index: null, created_at: 100 });
+    await store.upsertUser({ i0_pubkey: "abc", last_trade_index: null, created_at: 100 });
     const user = await store.getUser();
     assert.equal(user?.i0_pubkey, "abc");
     assert.equal(user?.last_trade_index, null);
 
-    const first = await store.reserveNextTradeIndex(MNEMONIC, 1);
+    const first = await store.reserveNextTradeIndex(SEED, 1);
     assert.equal(first.nextIndex, 2);
     assert.equal((await store.getUser())?.last_trade_index, 2);
 
-    await store.upsertUser({ i0_pubkey: "abc", mnemonic: MNEMONIC, last_trade_index: 1, created_at: 100 });
+    await store.upsertUser({ i0_pubkey: "abc", last_trade_index: 1, created_at: 100 });
     assert.equal((await store.getUser())?.last_trade_index, 2, "monotonic");
     await store.close();
   });
@@ -139,7 +141,6 @@ export function storageContract(runner: Runner, open: () => Store): void {
     const store = open();
     await store.upsertUser({
       i0_pubkey: "pk",
-      mnemonic: "m",
       last_trade_index: 3,
       created_at: 1,
     });

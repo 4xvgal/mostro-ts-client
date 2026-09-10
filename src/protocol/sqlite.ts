@@ -1,11 +1,14 @@
 // Shared SQLite Store factory. Each runtime backend (node:sqlite, bun:sqlite)
 // supplies its own `open(path) -> SqlDatabase`; the rest is identical.
 //
-// Sensitive columns (users.mnemonic, orders.trade_keys, orders.dispute_chat_shared_key_hex)
+// Sensitive columns (orders.trade_keys, orders.dispute_chat_shared_key_hex)
 // go through the optional FieldEncryptor. Plaintext rows stay readable when no
 // passphrase is supplied; encrypted rows decrypt only when the right passphrase is open.
+//
+// The users table holds no key material: the embedding app owns the mnemonic/
+// seed and passes the seed to reserveNextTradeIndex per call.
 
-import { deriveTradeKeys } from "./keys.js";
+import { deriveKeysFromSeed } from "./keys.js";
 import type { Store, UserRow, OrderRow, SaveOrderInput, ReservedTradeIndex } from "./store.js";
 import {
   decryptString,
@@ -29,7 +32,6 @@ export interface SqlDatabase {
 export const SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS users (
     i0_pubkey char(64) PRIMARY KEY,
-    mnemonic TEXT,
     last_trade_index INTEGER,
     created_at INTEGER
   );
@@ -109,13 +111,6 @@ export function createSqliteStore(
     db.exec("PRAGMA journal_mode = WAL;");
     db.exec(SCHEMA_SQL);
 
-    const mnemonicDecrypt = (row: UserRow | null): Promise<UserRow | null> => {
-      if (!row?.mnemonic) {
-        return Promise.resolve(row);
-      }
-      return decryptString(encryptor, row.mnemonic).then((mnemonic) => ({ ...row, mnemonic }));
-    };
-
     const orderDecrypt = (row: OrderRow | null): Promise<OrderRow | null> => {
       if (!row) {
         return Promise.resolve(row);
@@ -134,33 +129,31 @@ export function createSqliteStore(
 
     return {
       async upsertUser(user: UserRow): Promise<void> {
-        const mnemonic = user.mnemonic ? await encryptString(encryptor, user.mnemonic) : user.mnemonic;
         db.prepare(
-          `INSERT INTO users (i0_pubkey, mnemonic, last_trade_index, created_at)
-           VALUES (?, ?, ?, ?)
+          `INSERT INTO users (i0_pubkey, last_trade_index, created_at)
+           VALUES (?, ?, ?)
            ON CONFLICT(i0_pubkey) DO UPDATE SET
-             mnemonic = excluded.mnemonic,
              last_trade_index = MAX(COALESCE(users.last_trade_index, 0), COALESCE(excluded.last_trade_index, 0)),
              created_at = excluded.created_at`,
-        ).run(user.i0_pubkey, mnemonic, user.last_trade_index, user.created_at);
+        ).run(user.i0_pubkey, user.last_trade_index, user.created_at);
       },
 
       async getUser(): Promise<UserRow | null> {
         const row = db
-          .prepare(`SELECT i0_pubkey, mnemonic, last_trade_index, created_at FROM users LIMIT 1`)
+          .prepare(`SELECT i0_pubkey, last_trade_index, created_at FROM users LIMIT 1`)
           .get() as Record<string, unknown> | undefined;
-        return mnemonicDecrypt(row ? (row as unknown as UserRow) : null);
+        return (row as unknown as UserRow | undefined) ?? null;
       },
 
-      async reserveNextTradeIndex(mnemonic: string, noneBase: number): Promise<ReservedTradeIndex> {
+      async reserveNextTradeIndex(seed: Uint8Array, noneBase: number): Promise<ReservedTradeIndex> {
         const user = db
-          .prepare(`SELECT i0_pubkey, mnemonic, last_trade_index, created_at FROM users LIMIT 1`)
+          .prepare(`SELECT i0_pubkey, last_trade_index, created_at FROM users LIMIT 1`)
           .get() as Record<string, unknown> | undefined;
         const pubkey = (user?.i0_pubkey as string | undefined) ?? "";
         const last = (user?.last_trade_index as number | null | undefined) ?? null;
         const nextIndex = (last ?? noneBase) + 1;
         db.prepare(`UPDATE users SET last_trade_index = ? WHERE i0_pubkey = ?`).run(nextIndex, pubkey);
-        return { nextIndex, keys: deriveTradeKeys(mnemonic, nextIndex) };
+        return { nextIndex, keys: deriveKeysFromSeed(seed, nextIndex) };
       },
 
       async saveOrder(order: SaveOrderInput): Promise<{ inserted: boolean }> {

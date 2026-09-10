@@ -102,8 +102,6 @@ export interface DmRouterOptions {
   relays: string[];
   mostroPubkeyHex: string;
   transport: Transport;
-  /** identity mnemonic for deriving trade keys (optional — use tradeSecretHex map instead). */
-  mnemonic?: string;
   /** Known trade secrets to subscribe immediately (order_id → trade_secret). */
   initialTrades?: Map<string, string>;
   /** Callback for tracked-order DMs (after waiter consumption). */

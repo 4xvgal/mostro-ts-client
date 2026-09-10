@@ -16,3 +16,4 @@ docker/regtest/config/mostro.db*
 # TUI runtime (per-instance stores + hold invoice dumps)
 /tui/*.db*
 /tui/hold-invoice.txt
+/tui/.mostro-tui.mnemonic

@@ -9,7 +9,7 @@ import { newOrderMessage } from "./message.js";
 import type { Message, Payload, RestoreSessionInfo } from "./message.js";
 import { sendDm } from "./dmRouter.js";
 import { unwrapMessageNip44, verifyEventSignature } from "./transport.js";
-import { deriveTradeKeys } from "./keys.js";
+import { deriveKeysFromSeed } from "./keys.js";
 import { isTerminalTradeStatus } from "./stateMachine.js";
 import type { Store } from "./store.js";
 
@@ -38,11 +38,11 @@ export async function restoreSession(params: {
   pool: SimplePool;
   relays: string[];
   mostroPubkeyHex: string;
-  mnemonic: string;
+  seed: Uint8Array;
   store: Store;
 }): Promise<RestoreSummary> {
-  const { pool, relays, mostroPubkeyHex, mnemonic, store } = params;
-  const identity = deriveTradeKeys(mnemonic, 0);
+  const { pool, relays, mostroPubkeyHex, seed, store } = params;
+  const identity = deriveKeysFromSeed(seed, 0);
 
   // Stage 1: RestoreSession.
   const message = newRestoreMessage(null);
@@ -104,7 +104,6 @@ export async function restoreSession(params: {
   if (effectiveLast > currentLast) {
     await store.upsertUser({
       i0_pubkey: identity.pubkey,
-      mnemonic,
       last_trade_index: effectiveLast,
       created_at: user?.created_at ?? Math.floor(Date.now() / 1000),
     });
@@ -113,7 +112,7 @@ export async function restoreSession(params: {
   for (const info of restoreData.orders) {
     const idStr = info.order_id;
     const existing = await store.getOrder(idStr);
-    const tradeKeys = deriveTradeKeys(mnemonic, info.trade_index);
+    const tradeKeys = deriveKeysFromSeed(seed, info.trade_index);
 
     if (existing && existing.fiat_code) {
       // Already known with real details: refresh status only.
@@ -160,7 +159,7 @@ export async function restoreSession(params: {
     await store.updateOrderStatus(idStr, "dispute");
     await store.updateDisputeId(idStr, dispute.dispute_id);
     if (dispute.solver_pubkey) {
-      const tradeKeys = deriveTradeKeys(mnemonic, dispute.trade_index);
+      const tradeKeys = deriveKeysFromSeed(seed, dispute.trade_index);
       const { deriveChatKeys } = await import("./chatKeys.js");
       const chat = deriveChatKeys(tradeKeys.secret, dispute.solver_pubkey);
       await store.updateSolverChat(idStr, dispute.solver_pubkey, chat.convSecretHex);

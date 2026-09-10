@@ -12,7 +12,6 @@ async function seedIdentity(store: Store) {
   const identity = deriveTradeKeys(MNEMONIC, 0);
   await store.upsertUser({
     i0_pubkey: identity.pubkey,
-    mnemonic: MNEMONIC,
     last_trade_index: null,
     created_at: 100,
   });
@@ -31,7 +30,6 @@ test("restore advances last_trade_index to max(restore, mostro)", async () => {
   const effectiveLast = 7;
   await store.upsertUser({
     i0_pubkey: identity.pubkey,
-    mnemonic: MNEMONIC,
     last_trade_index: effectiveLast,
     created_at: 100,
   });

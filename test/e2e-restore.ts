@@ -10,8 +10,8 @@ import {
   deriveTradeKeys,
   buildNewOrder,
   restoreSession,
-  openNodeSqliteStore,
   generateMnemonic,
+  mnemonicToSeed,
 } from "../src/protocol/index.js";
 import { openNodeSqliteStore } from "../src/protocol/node-store.js";
 import { sendDm, DmRouter } from "../src/protocol/dmRouter.js";
@@ -34,8 +34,8 @@ async function main() {
   const router = new DmRouter({ pool, relays: RELAYS, mostroPubkeyHex: mostroPubkey, transport: "nip44" });
   console.log("identity pubkey:", identity.pubkey.slice(0, 16) + "...");
 
-  // Create an order with trade index 1 (fresh identity → noneBase 1 → index 2 actually).
-  // Use a fresh identity each run so restore sees something.
+  // Create an order with a fresh identity so restore sees something. Mostro
+  // replies on the key the request was sent from (here the identity key).
   const { message } = buildNewOrder(
     { lastTradeIndex: null },
     { kind: "sell", fiatCode: "USD", fiatAmount: 12, paymentMethod: "SEPA", expirationDays: 1 },
@@ -50,9 +50,9 @@ async function main() {
 
   // Now restore.
   const store = openNodeSqliteStore();
+  const seed = mnemonicToSeed(MNEMONIC);
   await store.upsertUser({
     i0_pubkey: identity.pubkey,
-    mnemonic: MNEMONIC,
     last_trade_index: 1,
     created_at: Math.floor(Date.now() / 1000),
   });
@@ -61,7 +61,7 @@ async function main() {
     pool,
     relays: RELAYS,
     mostroPubkeyHex: mostroPubkey,
-    mnemonic: MNEMONIC,
+    seed,
     store,
   });
   console.log("restore summary:", JSON.stringify(summary));

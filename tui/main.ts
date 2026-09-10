@@ -9,6 +9,7 @@ import { writeFileSync, readFileSync } from "node:fs";
 import {
   MostroClient,
   generateMnemonic,
+  mnemonicToSeed,
   deriveTradeKeys,
   parseChatAttachment,
   type SmallOrder,
@@ -33,15 +34,27 @@ async function main() {
   }
 
   const store = openNodeSqliteStore(process.env.MOSTRO_STORE ?? "./tui/.mostro-tui.db");
-  let mnemonic = process.env.MOSTRO_MNEMONIC;
+  // The TUI owns its own mnemonic vault — the library store no longer persists
+  // secrets. Precedence: env var, local 0600 file, else generate + persist.
+  const MNEMONIC_FILE = process.env.MOSTRO_MNEMONIC_FILE ?? "./tui/.mostro-tui.mnemonic";
+  const readMnemonicFile = (): string | undefined => {
+    try {
+      const v = readFileSync(MNEMONIC_FILE, "utf8").trim();
+      return v.length > 0 ? v : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  let mnemonic = process.env.MOSTRO_MNEMONIC || readMnemonicFile();
   if (!mnemonic) {
-    const user = await store.getUser();
-    mnemonic = user?.mnemonic ?? generateMnemonic();
+    mnemonic = generateMnemonic();
+    writeFileSync(MNEMONIC_FILE, mnemonic, { mode: 0o600 });
   }
+  const seed = mnemonicToSeed(mnemonic);
 
   const blossomServers = process.env.MOSTRO_BLOSSOM?.split(",").map((s) => s.trim()).filter(Boolean);
   const client = new MostroClient({
-    mnemonic,
+    seed,
     mostroPubkey,
     relays: RELAYS,
     store,
@@ -51,7 +64,6 @@ async function main() {
   if (!(await store.getUser())) {
     await store.upsertUser({
       i0_pubkey: client.identity,
-      mnemonic,
       last_trade_index: 0,
       created_at: Math.floor(Date.now() / 1000),
     });

@@ -57,7 +57,6 @@ export interface NewOrderOutcome {
  * stamp a fresh request_id.
  *
  * @param state current lastTradeIndex (use null on first run)
- * @param mnemonic used to derive the trade key for this order
  * @param input order form data
  */
 export function buildNewOrder(

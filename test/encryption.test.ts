@@ -72,15 +72,14 @@ test("raw key cannot open a passphrase envelope", async () => {
   raw.close();
 });
 
-test("sqlite store encrypts sensitive columns (mnemonic + trade_keys)", async () => {
+test("sqlite store encrypts sensitive columns (trade_keys + solver chat key)", async () => {
   const enc = lazyPassphraseEncryptor("pw");
   const store = openNodeSqliteStore(":memory:", { encryptor: enc });
-  const mnemonic = "near bonus gram six equip visa tuna build flame fee era hit";
-  await store.upsertUser({ i0_pubkey: "p0p", mnemonic, last_trade_index: 0, created_at: 1 });
+  await store.upsertUser({ i0_pubkey: "p0p", last_trade_index: 0, created_at: 1 });
 
   const fetched = await store.getUser();
   assert.ok(fetched !== null);
-  assert.equal(fetched!.mnemonic, mnemonic);
+  assert.equal(fetched!.i0_pubkey, "p0p");
 
   const order = {
     id: "o1",

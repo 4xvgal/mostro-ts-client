@@ -5,7 +5,8 @@
 //
 // Run: npx tsx test/e2e-client.ts
 
-import { MostroClient, generateMnemonic } from "../src/protocol/index.js";
+import { MostroClient, generateMnemonic, mnemonicToSeed } from "../src/protocol/index.js";
+import { openNodeSqliteStore } from "../src/protocol/node-store.js";
 import { createMostroStore } from "../src/react/store.js";
 import { infoFromRelay } from "./lib/relay.js";
 import { SimplePool } from "nostr-tools/pool";
@@ -19,9 +20,9 @@ async function main() {
   pool.close(RELAYS);
   if (!mostroPubkey) throw new Error("no mostro info event");
 
-  const mnemonic = generateMnemonic();
+  const seed = mnemonicToSeed(generateMnemonic());
 
-  const client = new MostroClient({ mnemonic, mostroPubkey, relays: RELAYS });
+  const client = new MostroClient({ seed, mostroPubkey, relays: RELAYS, store: openNodeSqliteStore() });
 
   // Reactive store + client binding (React integration path).
   const store = createMostroStore();

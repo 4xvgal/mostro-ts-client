@@ -31,21 +31,26 @@ function derivationPath(tradeIndex: number): string {
 }
 
 /**
- * Derive keys at `m/44'/1237'/38383'/0/{tradeIndex}`.
+ * Convert a BIP-39 mnemonic to its 64-byte seed.
  *
- * Mirrors `Keys::from_mnemonic_advanced(&mnemonic, None, Some(38383), Some(0),
- * Some(index))` in mostrix. The last index is NON-hardened (matches the
- * mostro-webtool and mostrix derivation); the pubkey is x-only (32-byte,
- * nostr PublicKey form).
+ * The library only ever needs the seed for derivation; callers that already
+ * hold a seed should pass it to `deriveKeysFromSeed` to avoid re-running the
+ * PBKDF2 step.
  */
-export function deriveKeysFromMnemonic(mnemonic: string, tradeIndex: number): DerivedKeys {
-  if (!bip39.validateMnemonic(mnemonic)) {
-    throw new Error("invalid mnemonic");
-  }
+export function mnemonicToSeed(mnemonic: string): Uint8Array {
+  return bip39.mnemonicToSeedSync(mnemonic);
+}
+
+/**
+ * Derive keys at `m/44'/1237'/38383'/0/{tradeIndex}` from a BIP-39 seed.
+ *
+ * The last index is NON-hardened (matches the mostro-webtool and mostrix
+ * derivation); the pubkey is x-only (32-byte, nostr PublicKey form).
+ */
+export function deriveKeysFromSeed(seed: Uint8Array, tradeIndex: number): DerivedKeys {
   if (tradeIndex < 0 || tradeIndex > MAX_TRADE_INDEX) {
     throw new Error(`Invalid trade_index ${tradeIndex} for key derivation; expected 0..=${MAX_TRADE_INDEX}`);
   }
-  const seed = bip39.mnemonicToSeedSync(mnemonic);
   const root = HDKey.fromMasterSeed(seed);
   const child = root.derive(derivationPath(tradeIndex));
   if (!child.privateKey) {
@@ -54,6 +59,19 @@ export function deriveKeysFromMnemonic(mnemonic: string, tradeIndex: number): De
   const secret = hex.encode(child.privateKey);
   const pubkey = hex.encode(secp256k1.getPublicKey(child.privateKey, true).slice(1));
   return { pubkey, secret, path: derivationPath(tradeIndex) };
+}
+
+/**
+ * Derive keys at `m/44'/1237'/38383'/0/{tradeIndex}` from a BIP-39 mnemonic.
+ *
+ * Mirrors `Keys::from_mnemonic_advanced(&mnemonic, None, Some(38383), Some(0),
+ * Some(index))` in mostrix.
+ */
+export function deriveKeysFromMnemonic(mnemonic: string, tradeIndex: number): DerivedKeys {
+  if (!bip39.validateMnemonic(mnemonic)) {
+    throw new Error("invalid mnemonic");
+  }
+  return deriveKeysFromSeed(mnemonicToSeed(mnemonic), tradeIndex);
 }
 
 /** Derive the identity key (trade index 0). */

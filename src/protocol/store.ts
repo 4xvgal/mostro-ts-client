@@ -11,7 +11,6 @@ import type { DerivedKeys } from "./keys.js";
 
 export interface UserRow {
   i0_pubkey: string;
-  mnemonic: string;
   last_trade_index: number | null;
   created_at: number;
 }
@@ -128,8 +127,13 @@ export interface Store {
   // users
   upsertUser(user: UserRow): Promise<void>;
   getUser(): Promise<UserRow | null>;
-  /** Atomically increment last_trade_index and derive the next trade keys. */
-  reserveNextTradeIndex(mnemonic: string, noneBase: number): Promise<ReservedTradeIndex>;
+  /**
+   * Atomically increment last_trade_index and derive the next trade keys.
+   *
+   * The seed is supplied per call: the store deliberately persists no secret
+   * key material (the embedding app owns the mnemonic/seed).
+   */
+  reserveNextTradeIndex(seed: Uint8Array, noneBase: number): Promise<ReservedTradeIndex>;
 
   // orders
   saveOrder(order: SaveOrderInput): Promise<OrderStoreResult>;
