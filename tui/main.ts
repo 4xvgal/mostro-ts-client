@@ -178,6 +178,7 @@ async function main() {
     if (selectedIdx >= orders.length) selectedIdx = Math.max(0, orders.length - 1);
     const pad = (s: string, n: number) => s.padEnd(n).slice(0, n);
     const visibleLen = (s: string) => s.replace(/\{[^}]*\}/g, "").length;
+    const vpad = (s: string, n: number) => s + " ".repeat(Math.max(0, n - visibleLen(s)));
     const inner = Number(screen.width) - 2;
     const fill = (line: string) => line + " ".repeat(Math.max(0, inner - visibleLen(line)));
     const head = fill(
@@ -196,11 +197,12 @@ async function main() {
       const kind = o.kind === "sell"
         ? `{yellow-fg}${pad("SELL", 6)}{/}`
         : `{cyan-fg}${pad("BUY", 6)}{/}`;
+      const isRange = o.min_amount != null && o.max_amount != null;
+      const starsCell = avg > 0 ? vpad(stars, 11) : pad("·", 11);
       const row =
         `${sel}${kind}${pad(o.id?.slice(0, 8) ?? "-", 9)}` +
-        `${pad(o.amount === 0 ? "market" : `${o.amount}sats`, 9)}${pad(o.fiat_code, 5)}` +
-        `${pad(`${o.fiat_amount}`, 8)}${pad(`${o.premium > 0 ? "+" : ""}${o.premium}%`, 6)}` +
-        `${pad(stars, 11)}${pad(o.payment_method, 16)}${pad(created, 12)}`;
+        `${pad(isRange ? "range" : o.amount === 0 ? "market" : `${o.amount}sats`, 9)}${pad(o.fiat_code, 5)}` +
+        `${pad(isRange ? `${o.min_amount}~${o.max_amount}` : `${o.fiat_amount}`, 8)}${pad(`${o.premium > 0 ? "+" : ""}${o.premium}%`, 6)}${starsCell}${pad(o.payment_method, 16)}${pad(created, 12)}`;
       return fill(row);
     });
     ordersBox.setContent([head, ...lines].join("\n"));
@@ -220,23 +222,42 @@ async function main() {
     tags: true,
   });
   const formFields = {
+    mode: { label: "Mode (fixed/range)", value: "fixed" },
     kind: { label: "Kind (buy/sell)", value: "sell" },
     fiatCode: { label: "Fiat code", value: "USD" },
     fiatAmount: { label: "Fiat amount", value: "100" },
+    rangeMin: { label: "Range min", value: "100" },
+    rangeMax: { label: "Range max", value: "400" },
     payment: { label: "Payment method", value: "SEPA" },
     premium: { label: "Premium %", value: "0" },
     days: { label: "Expiration days", value: "1" },
   } as const;
   type FormKey = keyof typeof formFields;
-  const formKeys: FormKey[] = ["kind", "fiatCode", "fiatAmount", "payment", "premium", "days"];
+  const formKeys: FormKey[] = ["kind", "fiatCode", "mode", "fiatAmount", "rangeMin", "rangeMax", "premium", "payment", "days"];
   let formCursor = 0;
+  const moveFormCursor = (delta: number) => {
+    const vis = visibleFormKeys();
+    const idx = Math.max(0, vis.indexOf(formKeys[formCursor]!));
+    const next = vis[(idx + delta + vis.length) % vis.length]!;
+    formCursor = formKeys.indexOf(next);
+    renderForm();
+  };
+
+  const visibleFormKeys = (): FormKey[] => {
+    const isRange = formFields.mode.value === "range";
+    return formKeys.filter((k) => {
+      if (k === "fiatAmount") return !isRange;
+      if (k === "rangeMin" || k === "rangeMax") return isRange;
+      return true;
+    });
+  };
 
   const renderForm = () => {
     const lines = ["Enter submit | ↑↓ field | q back", ""];
-    formKeys.forEach((k, i) => {
+    visibleFormKeys().forEach((k) => {
       const f = formFields[k];
-      const sel = i === formCursor ? "{green-fg}>{/} " : "  ";
-      const edit = i === formCursor ? `{bold}${f.value}{/}` : f.value;
+      const sel = k === formKeys[formCursor] ? "{green-fg}>{/} " : "  ";
+      const edit = k === formKeys[formCursor] ? `{bold}${f.value}{/}` : f.value;
       lines.push(`${sel}${f.label}: ${edit}`);
     });
     formBox.setContent(lines.join("\n"));
@@ -332,6 +353,61 @@ async function main() {
     statusBar.setContent(
       `{green-fg}${activeTab}{/} | ${client.identity.slice(0, 12)} | ${RELAY} | ${mostroPubkey.slice(0, 8)}`,
     );
+  };
+
+  // ----- range take: ask the taker for the fiat amount -----
+  const showRangeTakeInput = (order: SmallOrder) => {
+    const box = blessed.box({
+      parent: screen,
+      top: "center",
+      left: "center",
+      width: 60,
+      height: 7,
+      border: { type: "line" },
+      label: " Range take amount ",
+      tags: true,
+      content: `Range: ${order.min_amount}~${order.max_amount} ${order.fiat_code}\nAmount to take:`,
+    });
+    const input = blessed.textbox({
+      parent: box,
+      top: 3,
+      left: 1,
+      width: 54,
+      height: 1,
+    });
+    invoicePrompt = box;
+    input.focus();
+    input.readInput(() => {
+      const amount = Number.parseInt(input.getValue().trim(), 10);
+      box.destroy();
+      invoicePrompt = null;
+      screen.render();
+      if (!amount || amount < (order.min_amount ?? 0) || amount > (order.max_amount ?? 0)) {
+        log(`invalid range take amount (${order.min_amount}~${order.max_amount})`);
+        return;
+      }
+      showConfirm(
+        `Take ${order.kind} ${amount} ${order.fiat_code} from range?\n` +
+          `${order.amount === 0 ? "market" : order.amount} sats [${order.payment_method}]`,
+        () => {
+          log(`taking ${order.kind} ${amount} ${order.fiat_code}...`);
+          client
+            .takeOrder(order, { amount })
+            .then((res) => {
+              log(`take → next=${res.next}${res.amount != null ? ` amt=${res.amount}` : ""}`);
+              if (res.next === "add-invoice") {
+                showInvoiceInput(order.id!, res.amount ?? undefined);
+              } else if (res.next === "hold-invoice" && res.invoice) {
+                saveHoldInvoice(res.invoice);
+                openTradeActions(order.id!);
+              }
+              return renderTrades();
+            })
+            .catch((e: Error) => log(`take failed: ${e.message}`));
+        },
+      );
+    });
+    screen.render();
   };
 
   // ----- invoice popup (take → add-invoice) -----
@@ -676,8 +752,7 @@ async function main() {
       tradesIdx = Math.max(0, tradesIdx - 1);
       renderTrades();
     } else if (activeTab === "Create") {
-      formCursor = (formCursor - 1 + formKeys.length) % formKeys.length;
-      renderForm();
+      moveFormCursor(-1);
     }
   });
   screen.key(["down"], () => {
@@ -694,8 +769,7 @@ async function main() {
       tradesIdx++;
       renderTrades();
     } else if (activeTab === "Create") {
-      formCursor = (formCursor + 1) % formKeys.length;
-      renderForm();
+      moveFormCursor(1);
     }
   });
   screen.key(["enter"], () => {
@@ -712,6 +786,11 @@ async function main() {
     if (activeTab === "Orders") {
       const order = orders[selectedIdx];
       if (!order) return;
+      // Range order: ask the taker for the fiat amount first.
+      if (order.min_amount != null && order.max_amount != null) {
+        showRangeTakeInput(order);
+        return;
+      }
       // mostrix flow: confirm before taking (YES/NO overlay).
       const r = order.rating;
       const avg = r && r.total_reviews > 0 ? Math.min(5, Math.max(0, Math.round(r.total_rating / r.total_reviews))) : 0;
@@ -749,8 +828,11 @@ async function main() {
     if (activeTab === "Create") {
       // mostrix flow: confirm order summary before submitting.
       const f = formFields;
+      const rm = Number.parseInt(f.rangeMin.value, 10) || 0;
+      const rx = Number.parseInt(f.rangeMax.value, 10) || 0;
+      const amt = f.mode.value === "range" ? `${rm}-${rx}` : f.fiatAmount.value;
       showConfirm(
-        `Create ${f.kind.value} ${f.fiatAmount.value} ${f.fiatCode.value}?\n` +
+        `Create ${f.kind.value} ${amt} ${f.fiatCode.value}?\n` +
           `${f.payment.value} · ${f.premium.value}% premium · ${f.days.value}d`,
         () => submitForm(),
       );
@@ -762,7 +844,12 @@ async function main() {
     if (confirmActive || actionPopup || invoicePrompt) return;
     if (activeTab === "Create") {
       const k = formKeys[formCursor]!;
-      if (k === "kind") {
+      if (k === "mode") {
+        formFields.mode.value = formFields.mode.value === "fixed" ? "range" : "fixed";
+        if (!visibleFormKeys().includes(formKeys[formCursor]!)) {
+          formCursor = formKeys.indexOf("mode");
+        }
+      } else if (k === "kind") {
         formFields.kind.value = formFields.kind.value === "sell" ? "buy" : "sell";
       } else if (k === "fiatCode") {
         formFields.fiatCode.value = formFields.fiatCode.value === "USD" ? "EUR" : "USD";
@@ -804,7 +891,10 @@ async function main() {
     const kind = f.kind.value === "buy" ? "buy" : "sell";
     const fiatAmount = Number.parseInt(f.fiatAmount.value, 10) || 0;
     const premium = Number.parseInt(f.premium.value, 10) || 0;
-    log(`creating ${kind} ${fiatAmount} ${f.fiatCode.value} (premium ${premium}%)...`);
+    const rangeMin = Number.parseInt(f.rangeMin.value, 10) || 0;
+    const rangeMax = Number.parseInt(f.rangeMax.value, 10) || 0;
+    const isRange = f.mode.value === "range";
+    log(`creating ${kind} ${isRange ? `${rangeMin}-${rangeMax}` : fiatAmount} ${f.fiatCode.value} (premium ${premium}%)...`);
     client
       .createOrder({
         kind,
@@ -813,6 +903,7 @@ async function main() {
         paymentMethod: f.payment.value,
         expirationDays: Number.parseInt(f.days.value, 10) || 1,
         premium,
+        ...(isRange ? { minAmount: rangeMin, maxAmount: rangeMax } : {}),
       })
       .then((res) => {
         log(`created ${res.orderId.slice(0, 8)} status=${res.status}`);

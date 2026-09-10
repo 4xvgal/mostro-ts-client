@@ -32,11 +32,11 @@ function rangeOrder(overrides: Partial<SmallOrder> = {}): SmallOrder {
   };
 }
 
-test("range order with remaining amount produces NextTrade", () => {
+test("range order with remaining amount produces NextTrade", async () => {
   const keys = deriveTradeKeys(MNEMONIC, 2);
-  const payload = computeNextTradePayload({
+  const payload = await computeNextTradePayload({
     order: rangeOrder({ fiat_amount: 100 }), // remaining 200 >= min 100
-    reserveNext: () => ({ nextIndex: 2, keys }),
+    reserveNext: async () => ({ nextIndex: 2, keys }),
   });
   assert.deepEqual(payload, {
     variant: "next_trade",
@@ -44,22 +44,22 @@ test("range order with remaining amount produces NextTrade", () => {
   });
 });
 
-test("range order exhausted → null (no NextTrade)", () => {
+test("range order exhausted → null (no NextTrade)", async () => {
   // remaining = 300 - 250 = 50 < min 100
-  const payload = computeNextTradePayload({
+  const payload = await computeNextTradePayload({
     order: rangeOrder({ fiat_amount: 250 }),
-    reserveNext: () => {
+    reserveNext: async () => {
       throw new Error("should not reserve");
     },
   });
   assert.equal(payload, null);
 });
 
-test("fixed order (no min/max) → null", () => {
+test("fixed order (no min/max) → null", async () => {
   const fixed = { ...rangeOrder(), min_amount: null, max_amount: null };
-  const payload = computeNextTradePayload({
+  const payload = await computeNextTradePayload({
     order: fixed,
-    reserveNext: () => {
+    reserveNext: async () => {
       throw new Error("should not reserve");
     },
   });

@@ -353,12 +353,12 @@ export function handleRateUserResponse(kind: MessageKind, expectedRequestId: num
  *
  * Returns null when no NextTrade is needed (fixed order, or range exhausted).
  */
-export function computeNextTradePayload(input: {
+export async function computeNextTradePayload(input: {
   /** Current order (must carry min_amount/max_amount/fiat_amount). */
   order: SmallOrder;
   /** Reserve the next trade key for the range continuation. */
-  reserveNext: (noneBase: 0) => { nextIndex: number; keys: { pubkey: string } };
-}): Payload | null {
+  reserveNext: (noneBase: 0) => Promise<{ nextIndex: number; keys: { pubkey: string } }>;
+}): Promise<Payload | null> {
   const { order, reserveNext } = input;
   const { min_amount: min, max_amount: max, fiat_amount: fiat } = order;
   if (min === null || max === null) {
@@ -367,7 +367,7 @@ export function computeNextTradePayload(input: {
   if (max - fiat < min) {
     return null; // remaining amount below the next trade minimum
   }
-  const { nextIndex, keys } = reserveNext(0);
+  const { nextIndex, keys } = await reserveNext(0);
   return {
     variant: "next_trade",
     value: [keys.pubkey, nextIndex],

@@ -7,7 +7,7 @@
 
 import { SimplePool } from "nostr-tools/pool";
 import type { NostrEvent } from "nostr-tools/core";
-import type { Message, MessageKind } from "./message.js";
+import type { Message, MessageKind, Payload } from "./message.js";
 import type { SmallOrder } from "./order.js";
 import { deriveIdentityKeys } from "./keys.js";
 import type { Store, UserRow } from "./store.js";
@@ -19,7 +19,7 @@ import type { ChatMessage } from "./chat.js";
 import { fetchPublicOrderBook } from "./orderbook.js";
 import { applyTradeDm } from "./applicator.js";
 import { restoreSession } from "./restore.js";
-import { buildNewOrder, buildTradeMessage, buildTakeOrderPayload, takeActionForOrder, newRequestId, handleNewOrderResponse, handleTakeOrderResponse, buildDisputeMessage, handleDisputeNotification } from "./flow.js";
+import { buildNewOrder, buildTradeMessage, buildTakeOrderPayload, takeActionForOrder, newRequestId, handleNewOrderResponse, handleTakeOrderResponse, buildDisputeMessage, handleDisputeNotification, computeNextTradePayload } from "./flow.js";
 import { buildInvoiceMessage, handleAddInvoiceResponse } from "./invoice.js";
 import { buildRateUserMessage, handleRateUserResponse } from "./flow.js";
 import { mostroInfoFromTags } from "./mostroInfo.js";
@@ -376,10 +376,28 @@ export class MostroClient {
     return handleAddInvoiceResponse(reply, requestId);
   }
 
-  /** Send FiatSent or Release for an order. */
+  /** Send FiatSent or Release for an order. For a maker range order with
+   * remaining amount, attaches the NextTrade payload so Mostro republishes the
+   * remainder as a fresh pending order. */
   async sendTradeAction(orderId: string, action: "fiat-sent" | "release"): Promise<void> {
     const tradeSecret = this.requireTradeSecret(orderId);
-    const message = buildTradeMessage({ orderId, requestId: newRequestId(), action, payload: null });
+    const order = await this.store.getOrder(orderId);
+    let payload: Payload | null = null;
+    if (order?.is_mine === 1 && order.min_amount != null && order.max_amount != null) {
+      payload = await computeNextTradePayload({
+        order: {
+          min_amount: order.min_amount,
+          max_amount: order.max_amount,
+          fiat_amount: order.fiat_amount,
+          // computeNextTradePayload only reads the range fields above.
+        } as unknown as import("./order.js").SmallOrder,
+        reserveNext: async (noneBase) => {
+          const r = await this.store.reserveNextTradeIndex(this.opts.mnemonic, noneBase);
+          return { nextIndex: r.nextIndex, keys: { pubkey: r.keys.pubkey } };
+        },
+      });
+    }
+    const message = buildTradeMessage({ orderId, requestId: newRequestId(), action, payload });
     await this.roundtrip(tradeSecret, message, "fiat-sent-ok", "hold-invoice-payment-settled");
   }
 
