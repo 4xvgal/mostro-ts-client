@@ -179,7 +179,12 @@ async function main() {
     const lines = orders.map((o, i) => {
       const sel = i === selectedIdx ? "{green-fg}{bold}> {/}" : "  ";
       const kind = o.kind === "sell" ? "{yellow-fg}SELL{/}" : "{cyan-fg}BUY{/}";
-      return `${sel}${kind} ${o.fiat_amount} ${o.fiat_code} @ ${o.amount === 0 ? "market" : o.amount}sats [${o.payment_method}] ${o.id?.slice(0, 8)}`;
+      const r = o.rating;
+      const avg = r && r.total_reviews > 0 ? Math.min(5, Math.max(0, Math.round(r.total_rating / r.total_reviews))) : 0;
+      const stars = avg > 0
+        ? ` {yellow-fg}${"★".repeat(avg)}${"☆".repeat(5 - avg)}{/}(${r!.total_reviews})`
+        : "";
+      return `${sel}${kind} ${o.fiat_amount} ${o.fiat_code} @ ${o.amount === 0 ? "market" : o.amount}sats${stars} [${o.payment_method}] ${o.id?.slice(0, 8)}`;
     });
     ordersBox.setContent(lines.join("\n"));
     screen.render();
@@ -690,9 +695,14 @@ async function main() {
       const order = orders[selectedIdx];
       if (!order) return;
       // mostrix flow: confirm before taking (YES/NO overlay).
+      const r = order.rating;
+      const avg = r && r.total_reviews > 0 ? Math.min(5, Math.max(0, Math.round(r.total_rating / r.total_reviews))) : 0;
+      const stars = avg > 0
+        ? ` {yellow-fg}${"★".repeat(avg)}${"☆".repeat(5 - avg)}{/}(${r!.total_reviews})`
+        : "";
       showConfirm(
         `Take ${order.kind} ${order.fiat_amount} ${order.fiat_code}?\n` +
-          `${order.amount === 0 ? "market" : order.amount} sats [${order.payment_method}]`,
+          `${order.amount === 0 ? "market" : order.amount} sats${stars} [${order.payment_method}]`,
         () => {
           log(`taking ${order.kind} ${order.fiat_amount} ${order.fiat_code}...`);
           client
