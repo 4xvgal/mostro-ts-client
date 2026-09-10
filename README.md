@@ -10,16 +10,17 @@ usable from Node or browser.
 npm install mostro-ts-client
 ```
 
-## Quick start
+## Quick start (Node)
 
 ```ts
-import { MostroClient, openSqliteStore } from "mostro-ts-client";
+import { MostroClient } from "mostro-ts-client";
+import { openNodeSqliteStore } from "mostro-ts-client/node";
 
 const client = new MostroClient({
-  mnemonic,              // BIP-39 seed
-  mostroPubkey,          // instance pubkey (hex)
+  mnemonic,                    // BIP-39 seed
+  mostroPubkey,                // instance pubkey (hex)
   relays: ["wss://relay.example"],
-  store: openSqliteStore(),   // or openIndexedDbStore() in browser
+  store: openNodeSqliteStore("./mostro.db"),
 });
 
 await client.start();
@@ -33,6 +34,33 @@ await client.restore();                                   // session recovery
 await client.stop();
 ```
 
+## Browser / React
+
+```ts
+import { MostroClient } from "mostro-ts-client";
+import { openIndexedDbStore } from "mostro-ts-client/browser";
+
+const client = new MostroClient({
+  mnemonic,
+  mostroPubkey,
+  relays,
+  store: openIndexedDbStore({ dbName: "mostro" }), // optional { encryptor }
+});
+```
+
+```tsx
+import { createMostroStore, bindMostroStore } from "mostro-ts-client/react";
+
+const uiStore = createMostroStore();
+uiStore.connect(client);              // bind before client.start()
+const { useMostroStore } = bindMostroStore(uiStore);
+
+const orders = useMostroStore((s) => s.orders);
+```
+
+Pass `{ encryptor: rawKeyEncryptor(key32) }` to the store to encrypt sensitive
+columns at rest (Argon2id/passphrase or wallet-injected 32-byte key).
+
 ## Features
 
 - Mostro protocol v2 (NIP-44 kind-14) transport
@@ -40,8 +68,8 @@ await client.stop();
 - Trade state machine + per-order DM history
 - P2P chat (K_conv/K_sign), disputes, admin actions
 - Blossom attachments (ChaCha20-Poly1305)
-- Session restore; SQLite (Node) and IndexedDB (browser) stores
-- React store bindings (`src/react/`)
+- Session restore; SQLite (`/node`, `/bun`) and IndexedDB (`/browser`) stores
+- React bindings at `mostro-ts-client/react` (framework-agnostic zustand store + `useMostroStore`)
 
 ## Local regtest stack
 
@@ -68,3 +96,7 @@ npm test
 ```
 
 Dev harness: `npx tsx tui/main.ts` (needs the local regtest stack).
+
+## License
+
+[MIT](LICENSE)
