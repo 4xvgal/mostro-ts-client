@@ -57,6 +57,10 @@
     "./browser": {
       "types": "./dist/protocol/idb.d.ts",
       "default": "./dist/protocol/idb.js"
+    },
+    "./react": {
+      "types": "./dist/react/hook.d.ts",
+      "default": "./dist/react/hook.js"
     }
   },
   "packageManager": "bun@1.3.14"

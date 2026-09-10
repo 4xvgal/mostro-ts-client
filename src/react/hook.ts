@@ -43,4 +43,8 @@ export function bindMostroStore(store: StoreSnapshot) {
 }
 
 export type { MostroUIState };
+// Re-export the framework-agnostic store factory so `mostro-ts-client/react`
+// is a one-stop entry (store + hook) for React apps.
+export { createMostroStore } from "./store.js";
+export type { MostroStore, MyTradeRow, OrderChats, ClientStatus } from "./store.js";
 export { createStore };
