@@ -413,13 +413,20 @@ export class MostroClient {
   }
 
   /**
-   * Cooperative cancel. Both parties send this; the first marks the initiator,
-   * the second completes the cancel (hold invoice canceled, seller refunded).
+   * Cancel an order. Both parties send this to cooperatively cancel an active
+   * trade; a maker (or taker) may also cancel a not-yet-active (pending) order
+   * unilaterally, where Mostro answers `canceled`.
    */
   async cancelOrder(orderId: string): Promise<void> {
     const tradeSecret = this.requireTradeSecret(orderId);
     const message = buildTradeMessage({ orderId, requestId: newRequestId(), action: "cancel", payload: null });
-    await this.roundtrip(tradeSecret, message, "cooperative-cancel-initiated-by-you", "cooperative-cancel-accepted");
+    await this.roundtrip(
+      tradeSecret,
+      message,
+      "cooperative-cancel-initiated-by-you",
+      "cooperative-cancel-accepted",
+      "canceled",
+    );
   }
 
   /** Open a dispute on an order. */

@@ -567,6 +567,14 @@ async function main() {
         });
       }
     }
+    if (
+      ["pending", "waiting-taker-bond", "waiting-buyer-invoice", "waiting-payment", "active", "holding-invoice", "in-progress"].includes(state)
+    ) {
+      items.push({
+        label: "Cancel order",
+        run: () => confirmCancel(orderId),
+      });
+    }
     if (await client.canOrderChat(orderId)) {
       items.push({
         label: "Peer chat",
@@ -629,6 +637,19 @@ async function main() {
           await openTradeActions(orderId);
         })
         .catch((e: Error) => log(`${action} failed: ${e.message}`));
+    });
+  };
+
+  const confirmCancel = (orderId: string) => {
+    closeActionPopup();
+    showConfirm(`Cancel order ${orderId.slice(0, 8)}?`, () => {
+      client
+        .cancelOrder(orderId)
+        .then(async () => {
+          log(`cancel sent for ${orderId.slice(0, 8)}`);
+          await openTradeActions(orderId);
+        })
+        .catch((e: Error) => log(`cancel failed: ${e.message}`));
     });
   };
 
