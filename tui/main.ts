@@ -224,10 +224,11 @@ async function main() {
     fiatCode: { label: "Fiat code", value: "USD" },
     fiatAmount: { label: "Fiat amount", value: "100" },
     payment: { label: "Payment method", value: "SEPA" },
+    premium: { label: "Premium %", value: "0" },
     days: { label: "Expiration days", value: "1" },
   } as const;
   type FormKey = keyof typeof formFields;
-  const formKeys: FormKey[] = ["kind", "fiatCode", "fiatAmount", "payment", "days"];
+  const formKeys: FormKey[] = ["kind", "fiatCode", "fiatAmount", "payment", "premium", "days"];
   let formCursor = 0;
 
   const renderForm = () => {
@@ -750,7 +751,7 @@ async function main() {
       const f = formFields;
       showConfirm(
         `Create ${f.kind.value} ${f.fiatAmount.value} ${f.fiatCode.value}?\n` +
-          `${f.payment.value} · ${f.days.value}d`,
+          `${f.payment.value} · ${f.premium.value}% premium · ${f.days.value}d`,
         () => submitForm(),
       );
     }
@@ -802,7 +803,8 @@ async function main() {
     const f = formFields;
     const kind = f.kind.value === "buy" ? "buy" : "sell";
     const fiatAmount = Number.parseInt(f.fiatAmount.value, 10) || 0;
-    log(`creating ${kind} ${fiatAmount} ${f.fiatCode.value}...`);
+    const premium = Number.parseInt(f.premium.value, 10) || 0;
+    log(`creating ${kind} ${fiatAmount} ${f.fiatCode.value} (premium ${premium}%)...`);
     client
       .createOrder({
         kind,
@@ -810,6 +812,7 @@ async function main() {
         fiatCode: f.fiatCode.value,
         paymentMethod: f.payment.value,
         expirationDays: Number.parseInt(f.days.value, 10) || 1,
+        premium,
       })
       .then((res) => {
         log(`created ${res.orderId.slice(0, 8)} status=${res.status}`);

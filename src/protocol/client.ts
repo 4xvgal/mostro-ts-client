@@ -268,6 +268,8 @@ export class MostroClient {
     minAmount?: number;
     maxAmount?: number;
     expirationDays?: number;
+    /** Premium percentage over market price (defaults to 0). */
+    premium?: number;
   }): Promise<CreateOrderResult> {
     const { nextIndex: tradeIndex, keys: tradeKeys } = await this.store.reserveNextTradeIndex(
       this.opts.mnemonic,
@@ -285,6 +287,7 @@ export class MostroClient {
         minAmount: input.minAmount,
         maxAmount: input.maxAmount,
         expirationDays: input.expirationDays,
+        premium: input.premium,
       },
     );
 
