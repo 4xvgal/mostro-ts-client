@@ -218,6 +218,14 @@ export {
 export type { ChatAttachment } from "./blossom.js";
 
 export {
+  lnurlpMetadataUrl,
+  fetchLnurlpMetadata,
+  lightningAddressReachable,
+  resolveLightningAddress,
+} from "./lnurlpay.js";
+export type { LnurlpMetadata } from "./lnurlpay.js";
+
+export {
   MOSTRO_LIST_FETCH_EVENT_LIMIT,
   orderFromTags,
   parseMakerRating,

@@ -1,0 +1,96 @@
+// LNURL-pay resolution for Lightning addresses / lnurl1 strings.
+//
+// Mirrors mostrix `src/util/ln_address.rs` (LNURL-pay metadata lookup) and the
+// LNURL-pay spec: `user@domain` → `https://domain/.well-known/lnurlp/user` →
+// `callback?amount=<msat>` → `pr` (bolt11). No dependencies — uses fetch.
+
+import { bech32, utf8 } from "@scure/base";
+
+/** Resolve a `user@domain` address or `lnurl1…` string to its LNURL-pay metadata URL. */
+export function lnurlpMetadataUrl(input: string): string {
+  const trimmed = input.trim();
+  if (trimmed.toLowerCase().startsWith("lnurl1")) {
+    // lnurl1… is a bech32-encoded URL.
+    const { words } = bech32.decode(trimmed as `${string}1${string}`, 1023);
+    return utf8.encode(new Uint8Array(bech32.fromWords(words)));
+  }
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  const at = trimmed.lastIndexOf("@");
+  if (at > 0) {
+    const user = trimmed.slice(0, at);
+    const domain = trimmed.slice(at + 1);
+    return `https://${domain}/.well-known/lnurlp/${user}`;
+  }
+  throw new Error(`not a Lightning address or lnurl: ${input}`);
+}
+
+/** LNURL-pay metadata returned by the well-known endpoint. */
+export interface LnurlpMetadata {
+  callback: string;
+  minSendable: number | null;
+  maxSendable: number | null;
+  metadata: string | null;
+}
+
+/** Fetch + validate LNURL-pay metadata (metadata `tag` must be `payRequest`). */
+export async function fetchLnurlpMetadata(input: string): Promise<LnurlpMetadata> {
+  const url = lnurlpMetadataUrl(input);
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`LNURL-pay metadata fetch returned ${res.status}`);
+  }
+  const json = (await res.json()) as Record<string, unknown>;
+  if (json.tag !== "payRequest" || typeof json.callback !== "string") {
+    throw new Error("endpoint is not a valid LNURL-pay service");
+  }
+  return {
+    callback: json.callback,
+    minSendable: typeof json.minSendable === "number" ? json.minSendable : null,
+    maxSendable: typeof json.maxSendable === "number" ? json.maxSendable : null,
+    metadata: typeof json.metadata === "string" ? json.metadata : null,
+  };
+}
+
+/** Reachability check for a Lightning address (mirrors mostrix ln_address_pay_request_reachable). */
+export async function lightningAddressReachable(input: string): Promise<boolean> {
+  try {
+    await fetchLnurlpMetadata(input);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolve a Lightning address to a bolt11 invoice for `amountMsat` (or the
+ * callback URL when no amount is given / the server takes none).
+ */
+export async function resolveLightningAddress(
+  input: string,
+  amountMsat?: number,
+): Promise<string> {
+  const meta = await fetchLnurlpMetadata(input);
+  if (amountMsat != null) {
+    if (meta.minSendable != null && amountMsat < meta.minSendable) {
+      throw new Error(`amount below minSendable (${meta.minSendable})`);
+    }
+    if (meta.maxSendable != null && amountMsat > meta.maxSendable) {
+      throw new Error(`amount above maxSendable (${meta.maxSendable})`);
+    }
+  }
+  const callback = new URL(meta.callback);
+  if (amountMsat != null) {
+    callback.searchParams.set("amount", String(amountMsat));
+  }
+  const res = await fetch(callback.toString());
+  if (!res.ok) {
+    throw new Error(`LNURL-pay callback returned ${res.status}`);
+  }
+  const json = (await res.json()) as Record<string, unknown>;
+  if (typeof json.pr !== "string" || json.pr.length === 0) {
+    throw new Error("LNURL-pay callback returned no invoice");
+  }
+  return json.pr;
+}

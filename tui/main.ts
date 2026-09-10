@@ -716,12 +716,13 @@ async function main() {
       alwaysScroll: true,
     });
     chatPrompt = box;
-    const input = blessed.textbox({
+const input = blessed.textbox({
       parent: box,
-      bottom: 1,
+      top: 3,
       left: 1,
-      width: 86,
+      width: 54,
       height: 1,
+      value: process.env.MOSTRO_LN_ADDRESS ?? "",
     });
     const renderChat = () => {
       if (closed) return;
