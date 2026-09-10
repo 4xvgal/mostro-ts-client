@@ -279,7 +279,19 @@ export class DmRouter {
   }
 }
 
-/** Try unwrap; null when not addressed to this key, throw propagates for malformed. */
+/**
+ * Try unwrap; null when not addressed to this key, throw propagates for malformed.
+ *
+ * Inbound protocol DMs are authenticated by the OUTER kind-14 event signature
+ * only. `handleEvent` already ran `verifyEventSignature(event)` and pinned the
+ * author to the configured Mostro pubkey before reaching here, and NIP-44
+ * decryption itself requires the sender to hold the key matching
+ * `event.pubkey` (ECDH). The inner `trade_sig`/`identity_proof` tuple element
+ * is therefore redundant for these messages, so we do NOT require it.
+ * Mostro builds (e.g. the regtest daemon) omit it; when a peer does include
+ * one, `unwrapMessageNip44` still verifies it — we only drop the requirement,
+ * never the check.
+ */
 function tryUnwrap(
   event: NostrEvent,
   tradeSecretHex: string,
@@ -288,7 +300,7 @@ function tryUnwrap(
     return unwrapMessageNip44({
       event: { kind: event.kind, pubkey: event.pubkey, content: event.content },
       receiverSecretHex: tradeSecretHex,
-      requireSignature: true,
+      requireSignature: false,
     });
   } catch {
     return null;

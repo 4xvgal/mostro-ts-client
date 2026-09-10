@@ -208,7 +208,12 @@ export function unwrapMessageNip44(params: {
     content: string;
   };
   receiverSecretHex: string;
-  /** Protocol paths set this: reject messages with no inner trade signature. */
+  /**
+   * Reject messages with no inner `trade_sig`. Defaults to false: protocol
+   * paths authenticate inbound DMs by the OUTER kind-14 event signature plus
+   * the pinned author, so the inner signature is optional. When a `trade_sig`
+   * IS present it is always verified regardless of this flag.
+   */
   requireSignature?: boolean;
 }): UnwrappedMessage | null {
   const { event, receiverSecretHex } = params;

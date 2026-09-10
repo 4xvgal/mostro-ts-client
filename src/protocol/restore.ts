@@ -252,12 +252,15 @@ async function roundtripDm(params: {
       new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 1000)),
     ])) as NostrEvent | "timeout";
 
+    // Outer-only authentication: every candidate below is gated on
+    // `verifyEventSignature` + `event.pubkey === mostroPubkeyHex` before we
+    // decrypt, so the inner trade_sig is not required (Mostro omits it).
     let candidate: NostrEvent | null = null;
     if (event !== "timeout" && event.pubkey === mostroPubkeyHex && verifyEventSignature(event)) {
       const u = unwrapMessageNip44({
         event: { kind: event.kind, pubkey: event.pubkey, content: event.content },
         receiverSecretHex: tradeSecretHex,
-        requireSignature: true,
+        requireSignature: false,
       });
       if (u && actionMatchesExpected(u.message.value.action, params.expectedAction)) {
         candidate = event;
@@ -273,7 +276,7 @@ async function roundtripDm(params: {
         const u = unwrapMessageNip44({
           event: { kind: e.kind, pubkey: e.pubkey, content: e.content },
           receiverSecretHex: tradeSecretHex,
-          requireSignature: true,
+          requireSignature: false,
         });
         if (u && actionMatchesExpected(u.message.value.action, params.expectedAction)) {
           candidate = e;
@@ -285,7 +288,7 @@ async function roundtripDm(params: {
       const u = unwrapMessageNip44({
         event: { kind: candidate.kind, pubkey: candidate.pubkey, content: candidate.content },
         receiverSecretHex: tradeSecretHex,
-        requireSignature: true,
+        requireSignature: false,
       });
       if (u) {
         return { sender: candidate.pubkey, message: u.message };
