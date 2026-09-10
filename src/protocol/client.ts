@@ -102,8 +102,14 @@ export class MostroClient {
   private disputeChatHistory = new Map<string, ChatMessage[]>();
   /** order_id → callback on a new dispute chat message. */
   private disputeChatHandlers = new Map<string, (msg: ChatMessage) => void>();
+  /** order_id → user↔user (peer) order chat history. */
+  private orderChatHistory = new Map<string, ChatMessage[]>();
+  /** order_id → callback on a new peer chat message. */
+  private orderChatHandlers = new Map<string, (msg: ChatMessage) => void>();
   /** Dedupe: conversation pubkey → subscribed. */
   private chatSubscribed = new Set<string>();
+  /** Dedupe: outer chat event id → recorded. */
+  private chatSeen = new Set<string>();
 
   // Identity/trade keys derived from the mnemonic.
   private identitySecret: string;
@@ -155,7 +161,12 @@ export class MostroClient {
       mostroPubkeyHex: this.opts.mostroPubkey,
       transport: info.protocol_version === 2 ? "nip44" : "gift-wrap",
       onOrderMessage: (orderId, message, event) => this.handleInboundDm(orderId, message),
-      onMessage: (orderId, message, event) => this.recordMessage(orderId, message, event.created_at),
+      onMessage: (orderId, message, event) => {
+        this.recordMessage(orderId, message, event.created_at);
+        // Order payloads carry the counterpart trade pubkey; subscribe peer
+        // chat once it is recorded.
+        if (orderId) void this.trackOrderChat(orderId);
+      },
     });
 
     // Restore in-flight orders from the store so DMs route correctly.
@@ -433,6 +444,109 @@ export class MostroClient {
     this.disputeChatHandlers.set(orderId, handler);
   }
 
+  /** Subscribe to user↔user (peer) order chat for an order. */
+  onOrderChat(orderId: string, handler: (msg: ChatMessage) => void): void {
+    this.orderChatHandlers.set(orderId, handler);
+  }
+
+  /** Peer chat history for an order (session-scoped). */
+  getOrderChat(orderId: string): ChatMessage[] {
+    return this.orderChatHistory.get(orderId) ?? [];
+  }
+
+  /** Send a message to the trade counterpart (encrypted user↔user chat). */
+  async sendOrderChat(orderId: string, message: string): Promise<void> {
+    const peer = await this.peerTradeKeys(orderId);
+    if (!peer) {
+      throw new Error(`no counterpart trade key known yet for order ${orderId}`);
+    }
+    const chat = deriveChatKeys(peer.secret, peer.pubkey);
+    const { event } = wrapChatMessage({
+      senderTradeSecretHex: peer.secret,
+      convSecretHex: chat.convSecretHex,
+      convPubkeyHex: chat.convPubkeyHex,
+      signSecretHex: chat.signSecretHex,
+      message,
+    });
+    await this.pool.publish(this.opts.relays, event);
+    this.recordOrderChat(orderId, {
+      content: message,
+      sender: pubkeyFromSecret(peer.secret),
+      created_at: event.created_at,
+      innerEventId: "",
+      outerEventId: event.id,
+    });
+  }
+
+  /**
+   * Resolve the counterpart trade pubkey for an order from the protocol DMs
+   * already seen (order payloads carry buyer/seller trade pubkeys).
+   */
+  private async peerTradeKeys(orderId: string): Promise<{ secret: string; pubkey: string } | null> {
+    const secret = this.trades.get(orderId);
+    if (!secret) return null;
+    const order = await this.store.getOrder(orderId);
+    if (order?.counterparty_pubkey) {
+      return { secret, pubkey: order.counterparty_pubkey };
+    }
+    const myPub = pubkeyFromSecret(secret);
+    for (const dm of this.messageHistory.get(orderId) ?? []) {
+      const p = dm.message.value.payload;
+      if (p && p.variant === "order") {
+        const o = p.value;
+        if (o.buyer_trade_pubkey && o.buyer_trade_pubkey !== myPub) {
+          return { secret, pubkey: o.buyer_trade_pubkey };
+        }
+        if (o.seller_trade_pubkey && o.seller_trade_pubkey !== myPub) {
+          return { secret, pubkey: o.seller_trade_pubkey };
+        }
+      }
+    }
+    return null;
+  }
+
+  /** Whether the counterpart trade key is known yet (peer chat available). */
+  async canOrderChat(orderId: string): Promise<boolean> {
+    return (await this.peerTradeKeys(orderId)) !== null;
+  }
+
+  /** Subscribe the user↔user chat conversation for an order, once the peer is known. */
+  private async trackOrderChat(orderId: string): Promise<void> {
+    const peer = await this.peerTradeKeys(orderId);
+    if (!peer) return;
+    const chat = deriveChatKeys(peer.secret, peer.pubkey);
+    if (this.chatSubscribed.has(chat.convPubkeyHex)) return;
+    this.chatSubscribed.add(chat.convPubkeyHex);
+    const myTradePubkey = pubkeyFromSecret(peer.secret);
+    const peerPubkey = peer.pubkey;
+    this.pool.subscribeMany(this.opts.relays, { kinds: [14], authors: [chat.signPubkeyHex], since: Math.floor(Date.now() / 1000) - 7 * 86400 }, {
+      onevent: (event) => {
+        try {
+          const msg = unwrapChatMessage({
+            convSecretHex: chat.convSecretHex,
+            convPubkeyHex: chat.convPubkeyHex,
+            signPubkeyHex: chat.signPubkeyHex,
+            allowedSigners: [myTradePubkey, peerPubkey],
+            outer: event,
+            now: Math.floor(Date.now() / 1000),
+          });
+          this.recordOrderChat(orderId, msg);
+        } catch {
+          // Not a valid conversation message.
+        }
+      },
+    });
+  }
+
+  private recordOrderChat(orderId: string, msg: ChatMessage): void {
+    if (msg.outerEventId && this.chatSeen.has(msg.outerEventId)) return;
+    if (msg.outerEventId) this.chatSeen.add(msg.outerEventId);
+    const list = this.orderChatHistory.get(orderId) ?? [];
+    list.push(msg);
+    this.orderChatHistory.set(orderId, list);
+    this.orderChatHandlers.get(orderId)?.(msg);
+  }
+
   /** Dispute chat history for an order (session-scoped). */
   getDisputeChat(orderId: string): ChatMessage[] {
     return this.disputeChatHistory.get(orderId) ?? [];
@@ -501,6 +615,8 @@ export class MostroClient {
   }
 
   private recordDisputeChat(orderId: string, msg: ChatMessage): void {
+    if (msg.outerEventId && this.chatSeen.has(msg.outerEventId)) return;
+    if (msg.outerEventId) this.chatSeen.add(msg.outerEventId);
     const list = this.disputeChatHistory.get(orderId) ?? [];
     list.push(msg);
     this.disputeChatHistory.set(orderId, list);

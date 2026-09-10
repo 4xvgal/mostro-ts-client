@@ -13,6 +13,7 @@ import {
   parseKind,
 } from "./stateMachine.js";
 import { deriveChatKeys } from "./chatKeys.js";
+import { pubkeyFromSecret } from "./transport.js";
 import type { Kind } from "./kind.js";
 
 /** Order payloads that carry an order snapshot to upsert. */
@@ -121,6 +122,16 @@ export async function applyTradeDm(params: {
   // Persist order snapshot (skip CantDo — never apply its payload status).
   const smallOrder = smallOrderFromPayload(action, kind.payload);
   if (smallOrder && smallOrder.id) {
+    // Learn the counterpart trade pubkey once the payload carries both sides.
+    let counterparty = existing?.counterparty_pubkey ?? null;
+    if (smallOrder.buyer_trade_pubkey && smallOrder.seller_trade_pubkey) {
+      const myPub = pubkeyFromSecret(tradeSecretHex);
+      if (smallOrder.buyer_trade_pubkey !== myPub) {
+        counterparty = smallOrder.buyer_trade_pubkey;
+      } else if (smallOrder.seller_trade_pubkey !== myPub) {
+        counterparty = smallOrder.seller_trade_pubkey;
+      }
+    }
     await store.saveOrder({
       id: orderId,
       kind: smallOrder.kind,
@@ -133,7 +144,7 @@ export async function applyTradeDm(params: {
       payment_method: smallOrder.payment_method,
       premium: smallOrder.premium,
       trade_keys: existing?.trade_keys ?? "",
-      counterparty_pubkey: existing?.counterparty_pubkey ?? null,
+      counterparty_pubkey: counterparty,
       is_mine: existing?.is_mine === 1,
       buyer_invoice: smallOrder.buyer_invoice,
       request_id: kind.request_id,
