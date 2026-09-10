@@ -1,0 +1,55 @@
+[lightning]
+lnd_cert_file = '/config/lnd/tls.cert'
+lnd_macaroon_file = '/config/lnd/data/chain/bitcoin/regtest/admin.macaroon'
+lnd_grpc_host = 'https://lnd-alice:10009'
+invoice_expiration_window = 3600
+hold_invoice_cltv_delta = 144
+hold_invoice_expiration_window = 300
+payment_attempts = 3
+payment_retries_interval = 60
+max_final_cltv_expiry_delta = 432
+escrow_deadline_margin_blocks = 24
+allow_node_change = true
+
+[nostr]
+nsec_privkey = 'nsec10s5gr2qm3r6vsjl0dkzjfr9ntynnkzmzc04vqqxx59r96vv3j25qw8uxer'
+relays = ['ws://nostr-relay:8080']
+transport = "nip44"
+
+[mostro]
+fee = 0
+max_routing_fee = 0.002
+max_order_amount = 1000000
+min_payment_amount = 100
+expiration_hours = 24
+max_expiration_days = 15
+expiration_seconds = 900
+user_rates_sent_interval_seconds = 60
+publish_relays_interval = 60
+publish_mostro_info_interval = 300
+pow = 0
+max_orders_per_response = 20
+dev_fee_percentage = 0.1
+fiat_currencies_accepted = ['USD', 'EUR']
+
+[database]
+url = "sqlite://mostro.db"
+
+[expiration]
+order_days = 30
+rating_days = 90
+info_days = 2
+dispute_days = 90
+fee_audit_days = 365
+dm_days = 30
+
+[rpc]
+enabled = false
+listen_address = "127.0.0.1"
+port = 50051
+
+[anti_abuse_bond]
+enabled = true
+amount_pct = 0.01
+base_amount_sats = 1000
+apply_to = "make"

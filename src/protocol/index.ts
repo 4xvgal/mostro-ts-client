@@ -275,6 +275,7 @@ export type {
   AppliedTradeState,
   CreateOrderResult,
   TakeOrderResult,
+  NextStep,
   ClientStoreSink,
   UserRating,
 } from "./client.js";

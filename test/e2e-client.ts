@@ -66,9 +66,9 @@ async function main() {
   const myOrder = book.find((o) => o.id === created.orderId);
   if (myOrder) {
     const take = await client.takeOrder(myOrder);
-    console.log("take result next:", take.next, take.amount ?? "");
-    if (take.next !== "add-invoice" && take.next !== "bond-invoice" && take.next !== "hold-invoice") {
-      throw new Error(`unexpected take result: ${take.next}`);
+    console.log("take result next:", take.next.type, take.next.type !== "none" ? (take.next.amount ?? "") : "");
+    if (take.next.type !== "add-invoice" && take.next.type !== "pay-bond" && take.next.type !== "pay-hold-invoice") {
+      throw new Error(`unexpected take result: ${take.next.type}`);
     }
   } else {
     console.log("order not in book yet (book refresh may lag) — skipping take");

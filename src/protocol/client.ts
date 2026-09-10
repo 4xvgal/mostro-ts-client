@@ -85,16 +85,30 @@ export interface AppliedTradeState {
   disputeId: string | null;
 }
 
+/**
+ * The next external step a UI must take after `createOrder`/`takeOrder`.
+ * Discriminate on `type` — an unhandled variant is a compile error.
+ */
+export type NextStep =
+  /** Order is live (or already accepted); nothing to do. */
+  | { type: "none" }
+  /** Pay an anti-abuse bond bolt11 before the order can proceed. */
+  | { type: "pay-bond"; role: "maker" | "taker"; invoice: string; amount: number | null }
+  /** Pay Mostro's hold invoice (escrow) to continue the trade. */
+  | { type: "pay-hold-invoice"; invoice: string; amount: number | null }
+  /** Submit the payout bolt11 Mostro is waiting for. */
+  | { type: "add-invoice"; amount: number | null };
+
 export interface CreateOrderResult {
   orderId: string;
   status: string | null;
+  next: NextStep;
 }
 
 export interface TakeOrderResult {
-  /** "hold-invoice" | "bond-invoice" | "add-invoice" — the next UI step. */
-  next: "hold-invoice" | "bond-invoice" | "add-invoice" | "ok";
-  invoice?: string;
-  amount?: number | null;
+  orderId: string;
+  status: string | null;
+  next: NextStep;
 }
 
 /**
@@ -339,21 +353,38 @@ export class MostroClient {
       },
     );
 
-    const reply = await this.roundtrip(tradeKeys.secret, message, "new-order");
+    // Bond-enabled instances answer NewOrder with pay-bond-invoice instead.
+    const reply = await this.roundtrip(tradeKeys.secret, message, "new-order", "pay-bond-invoice");
     const kind = reply;
     const result = handleNewOrderResponse(kind, requestId);
 
     let orderId: string;
     let status: string | null;
-    if (result.type === "order-created") {
-      orderId = result.order.id!;
-      status = result.order.status;
-    } else if (result.type === "bond-invoice") {
-      // Order id may be in the payload order or the message id.
-      orderId = result.order?.id ?? kind.id ?? "";
-      status = kind.id ? "waiting-maker-bond" : null;
-    } else {
-      throw new Error("unexpected create-order result");
+    let next: NextStep;
+    switch (result.type) {
+      case "order-created":
+        orderId = result.order.id!;
+        status = result.order.status;
+        next = { type: "none" };
+        break;
+      case "bond-invoice": {
+        // Order id may be in the payload order or the message id.
+        orderId = result.order?.id ?? kind.id ?? "";
+        status = kind.id ? "waiting-maker-bond" : null;
+        // Mostro sends a null amount in the payment_request tuple; fall back
+        // to the order's amount (the bond amount on a maker-bond order).
+        next = {
+          type: "pay-bond",
+          role: "maker",
+          invoice: result.invoice,
+          amount: result.amount ?? result.order?.amount ?? null,
+        };
+        break;
+      }
+      default: {
+        const exhaustive: never = result;
+        throw new Error(`unexpected create-order result: ${JSON.stringify(exhaustive)}`);
+      }
     }
 
     // Register the trade + persist.
@@ -366,7 +397,7 @@ export class MostroClient {
       created_at: Math.floor(Date.now() / 1000),
     });
 
-    return { orderId, status };
+    return { orderId, status, next };
   }
 
   /** Take an order; resolves to the next UI step (invoice needed, etc.). */
@@ -403,15 +434,48 @@ export class MostroClient {
     this.trades.set(order.id!, tradeKeys.secret);
     this.router!.trackOrder(order.id!, tradeKeys.secret);
 
-    if (result.type === "add-invoice") {
-      await this.persistOrder(order.id!, reply, tradeKeys.secret, tradeIndex, false);
-      return { next: "add-invoice", amount: result.order.amount };
+    let next: NextStep;
+    switch (result.type) {
+      case "add-invoice": {
+        await this.persistOrder(order.id!, reply, tradeKeys.secret, tradeIndex, false);
+        next = { type: "add-invoice", amount: result.order.amount };
+        break;
+      }
+      case "hold-invoice":
+        next = { type: "pay-hold-invoice", invoice: result.invoice, amount: result.amount };
+        break;
+      case "bond-invoice":
+        next = { type: "pay-bond", role: "taker", invoice: result.invoice, amount: result.amount };
+        break;
+      default: {
+        const exhaustive: never = result;
+        throw new Error(`unexpected take-order result: ${JSON.stringify(exhaustive)}`);
+      }
     }
-    return {
-      next: result.type,
-      invoice: result.invoice,
-      amount: result.amount,
-    };
+    return { orderId: order.id!, status: result.order?.status ?? null, next };
+  }
+
+  /**
+   * Resolve once the order is live on Mostro (its NIP-33 order event is
+   * published). Use after paying a maker bond: Mostro only publishes the
+   * order — and flips it to `pending` — once the bond hold invoice is
+   * accepted. Rejects after `timeoutMs` (default 60s).
+   *
+   * Polls the public order book, so the client's `currencies` filter (if any)
+   * must include the order's fiat currency.
+   */
+  async waitForOrderLive(orderId: string, timeoutMs = 60_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const book = await this.fetchOrders().catch(() => [] as SmallOrder[]);
+      if (book.some((o) => o.id === orderId)) {
+        return;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`order ${orderId} did not go live within ${timeoutMs}ms`);
+      }
+      await new Promise((r) => setTimeout(r, 750));
+    }
   }
 
   /** Submit a payout invoice for an order (AddInvoice). */

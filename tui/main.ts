@@ -414,11 +414,12 @@ async function main() {
           client
             .takeOrder(order, { amount })
             .then((res) => {
-              log(`take → next=${res.next}${res.amount != null ? ` amt=${res.amount}` : ""}`);
-              if (res.next === "add-invoice") {
-                showInvoiceInput(order.id!, res.amount ?? undefined);
-              } else if (res.next === "hold-invoice" && res.invoice) {
-                saveHoldInvoice(res.invoice);
+              const step = res.next;
+              log(`take → next=${step.type}${step.type !== "none" && step.amount != null ? ` amt=${step.amount}` : ""}`);
+              if (step.type === "add-invoice") {
+                showInvoiceInput(order.id!, step.amount ?? undefined);
+              } else if (step.type === "pay-hold-invoice" || step.type === "pay-bond") {
+                saveHoldInvoice(step.invoice);
                 openTradeActions(order.id!);
               }
               return renderTrades();
@@ -980,11 +981,12 @@ const input = blessed.textbox({
           client
             .takeOrder(order)
             .then((res) => {
-              log(`take → next=${res.next}${res.amount != null ? ` amt=${res.amount}` : ""}`);
-              if (res.next === "add-invoice") {
-                showInvoiceInput(order.id!, res.amount ?? undefined);
-              } else if (res.next === "hold-invoice" && res.invoice) {
-                saveHoldInvoice(res.invoice);
+              const step = res.next;
+              log(`take → next=${step.type}${step.type !== "none" && step.amount != null ? ` amt=${step.amount}` : ""}`);
+              if (step.type === "add-invoice") {
+                showInvoiceInput(order.id!, step.amount ?? undefined);
+              } else if (step.type === "pay-hold-invoice" || step.type === "pay-bond") {
+                saveHoldInvoice(step.invoice);
                 openTradeActions(order.id!);
               }
               return renderTrades();
