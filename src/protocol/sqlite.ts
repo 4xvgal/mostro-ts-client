@@ -77,6 +77,15 @@ export const SCHEMA_SQL = `
     buyer_shared_key_hex TEXT,
     seller_shared_key_hex TEXT
   );
+  CREATE TABLE IF NOT EXISTS chat_messages (
+    outer_event_id TEXT PRIMARY KEY,
+    order_id TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    sender TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    inner_event_id TEXT
+  );
 `;
 
 /** Build a Store backed by a SQLite-like database opened per path. */
@@ -197,6 +206,32 @@ export function createSqliteStore(open: (path: string) => SqlDatabase): (path?: 
         db.prepare(
           `UPDATE orders SET solver_pubkey = ?, dispute_chat_shared_key_hex = ? WHERE id = ?`,
         ).run(solverPubkey, sharedKeyHex, orderId);
+      },
+
+      async saveChatMessage(row): Promise<void> {
+        db.prepare(
+          `INSERT OR IGNORE INTO chat_messages
+             (outer_event_id, order_id, scope, sender, content, created_at, inner_event_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          row.outer_event_id,
+          row.order_id,
+          row.scope,
+          row.sender,
+          row.content,
+          row.created_at,
+          row.inner_event_id,
+        );
+      },
+
+      async getChatMessages(orderId: string, scope: string) {
+        const rows = db
+          .prepare(
+            `SELECT outer_event_id, order_id, scope, sender, content, created_at, inner_event_id
+             FROM chat_messages WHERE order_id = ? AND scope = ? ORDER BY created_at ASC`,
+          )
+          .all(orderId, scope) as Array<Record<string, unknown>>;
+        return rows as unknown as import("./store.js").ChatMessageRow[];
       },
 
       async close(): Promise<void> {

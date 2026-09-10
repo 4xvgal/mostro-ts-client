@@ -110,6 +110,19 @@ export interface OrderStoreResult {
   inserted: boolean;
 }
 
+/** A persisted chat message (order peer chat or dispute solver chat). */
+export interface ChatMessageRow {
+  /** Outer event id — dedup key. */
+  outer_event_id: string;
+  order_id: string;
+  /** "order" (peer) or "dispute" (solver). */
+  scope: string;
+  sender: string;
+  content: string;
+  created_at: number;
+  inner_event_id: string;
+}
+
 /** Async storage backend for client state. */
 export interface Store {
   // users
@@ -129,6 +142,12 @@ export interface Store {
   updateDisputeId(orderId: string, disputeId: string): Promise<void>;
   /** Persist the assigned solver and the derived user-to-solver chat secret. */
   updateSolverChat(orderId: string, solverPubkey: string, sharedKeyHex: string): Promise<void>;
+
+  // chat
+  /** Persist a chat message (idempotent on outer_event_id). */
+  saveChatMessage(row: ChatMessageRow): Promise<void>;
+  /** Chat messages for an order + scope, oldest first. */
+  getChatMessages(orderId: string, scope: string): Promise<ChatMessageRow[]>;
 
   close(): Promise<void>;
 }

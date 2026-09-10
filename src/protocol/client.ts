@@ -180,6 +180,7 @@ export class MostroClient {
       if (order.solver_pubkey) {
         await this.trackDisputeChat(order.id);
       }
+      await this.hydrateChat(order.id);
     }
 
     // Order-book poller.
@@ -551,6 +552,15 @@ export class MostroClient {
     const list = this.orderChatHistory.get(orderId) ?? [];
     list.push(msg);
     this.orderChatHistory.set(orderId, list);
+    void this.store.saveChatMessage({
+      outer_event_id: msg.outerEventId,
+      order_id: orderId,
+      scope: "order",
+      sender: msg.sender,
+      content: msg.content,
+      created_at: msg.created_at,
+      inner_event_id: msg.innerEventId,
+    });
     this.orderChatHandlers.get(orderId)?.(msg);
   }
 
@@ -627,7 +637,35 @@ export class MostroClient {
     const list = this.disputeChatHistory.get(orderId) ?? [];
     list.push(msg);
     this.disputeChatHistory.set(orderId, list);
+    void this.store.saveChatMessage({
+      outer_event_id: msg.outerEventId,
+      order_id: orderId,
+      scope: "dispute",
+      sender: msg.sender,
+      content: msg.content,
+      created_at: msg.created_at,
+      inner_event_id: msg.innerEventId,
+    });
     this.disputeChatHandlers.get(orderId)?.(msg);
+  }
+
+  /** Load persisted chat for an order into memory (idempotent). */
+  private async hydrateChat(orderId: string): Promise<void> {
+    if (this.orderChatHistory.has(orderId)) return;
+    const [order, dispute] = await Promise.all([
+      this.store.getChatMessages(orderId, "order"),
+      this.store.getChatMessages(orderId, "dispute"),
+    ]);
+    const toMsg = (r: { sender: string; content: string; created_at: number; inner_event_id: string; outer_event_id: string }): ChatMessage => ({
+      content: r.content,
+      sender: r.sender,
+      created_at: r.created_at,
+      innerEventId: r.inner_event_id,
+      outerEventId: r.outer_event_id,
+    });
+    this.orderChatHistory.set(orderId, order.map(toMsg));
+    this.disputeChatHistory.set(orderId, dispute.map(toMsg));
+    for (const r of [...order, ...dispute]) this.chatSeen.add(r.outer_event_id);
   }
 
   /** Restore session state from Mostro (rebuilds store + trade routing). */
@@ -657,6 +695,7 @@ export class MostroClient {
       if (order.solver_pubkey) {
         await this.trackDisputeChat(order.id);
       }
+      await this.hydrateChat(order.id);
     }
   }
 

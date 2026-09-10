@@ -7,11 +7,12 @@
 // the read-modify-write (no interleaved reservations between awaits).
 
 import { deriveTradeKeys } from "./keys.js";
-import type { Store, UserRow, OrderRow, SaveOrderInput, ReservedTradeIndex } from "./store.js";
+import type { Store, UserRow, OrderRow, SaveOrderInput, ReservedTradeIndex, ChatMessageRow } from "./store.js";
 
 const STORE_USERS = "users";
 const STORE_ORDERS = "orders";
 const STORE_DISPUTES = "admin_disputes";
+const STORE_CHAT = "chat_messages";
 
 interface OrdersDb {
   id: string;
@@ -43,7 +44,7 @@ const USER_KEY = "identity";
 
 function openDb(dbName: string): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(dbName, 1);
+    const req = indexedDB.open(dbName, 2);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE_USERS)) {
@@ -54,6 +55,9 @@ function openDb(dbName: string): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(STORE_DISPUTES)) {
         db.createObjectStore(STORE_DISPUTES, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(STORE_CHAT)) {
+        db.createObjectStore(STORE_CHAT, { keyPath: "outer_event_id" });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -232,6 +236,19 @@ export function openIndexedDbStore(opts: { dbName?: string } = {}): Store {
     async close(): Promise<void> {
       const database = await db();
       database.close();
+    },
+
+    async saveChatMessage(row: ChatMessageRow): Promise<void> {
+      const database = await db();
+      await txn(database, STORE_CHAT, "readwrite", (s) => s.put(row));
+    },
+
+    async getChatMessages(orderId: string, scope: string): Promise<ChatMessageRow[]> {
+      const database = await db();
+      const all = await txn<ChatMessageRow[]>(database, STORE_CHAT, "readonly", (s) => s.getAll());
+      return (all ?? [])
+        .filter((m) => m.order_id === orderId && m.scope === scope)
+        .sort((a, b) => a.created_at - b.created_at);
     },
   };
 }

@@ -111,5 +111,29 @@ export function storageContract(runner: Runner, open: () => Store): void {
     await store.close();
   });
 
+  test("chat: save (idempotent) + get by order/scope", async () => {
+    const store = open();
+    const msg = (id: string, scope: string, ts: number) => ({
+      outer_event_id: id,
+      order_id: "o",
+      scope,
+      sender: "sender-pk",
+      content: `msg ${id}`,
+      created_at: ts,
+      inner_event_id: `inner-${id}`,
+    });
+    await store.saveChatMessage(msg("e1", "order", 100));
+    await store.saveChatMessage(msg("e2", "order", 200));
+    await store.saveChatMessage(msg("e1", "order", 100)); // duplicate ignored
+    await store.saveChatMessage(msg("d1", "dispute", 150));
+
+    const peer = await store.getChatMessages("o", "order");
+    assert.deepEqual(peer.map((m) => m.outer_event_id), ["e1", "e2"]);
+    const solver = await store.getChatMessages("o", "dispute");
+    assert.deepEqual(solver.map((m) => m.outer_event_id), ["d1"]);
+    assert.deepEqual(await store.getChatMessages("other", "order"), []);
+    await store.close();
+  });
+
   void assert;
 }
