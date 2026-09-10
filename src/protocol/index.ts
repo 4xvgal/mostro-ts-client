@@ -69,7 +69,7 @@ export type {
 } from "./flow.js";
 
 export { newSmallOrder, satsAmount, checkFiatAmount, checkAmount, checkZeroAmountWithPremium, checkRangeOrderLimits, checkFiatCurrency, isRangeOrder } from "./order.js";
-export type { Order, SmallOrder } from "./order.js";
+export type { Order, SmallOrder, MakerRating } from "./order.js";
 
 export {
   newPeer,
@@ -215,6 +215,7 @@ export {
 export {
   MOSTRO_LIST_FETCH_EVENT_LIMIT,
   orderFromTags,
+  parseMakerRating,
   aggregateLatestOrdersById,
   parseOrdersEvents,
   pendingOrdersForBook,

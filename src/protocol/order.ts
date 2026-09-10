@@ -56,6 +56,16 @@ export interface Order {
   cashu_escrow_locked_at: number | null;
 }
 
+/** Maker reputation attached to orderbook events (mostro kind-38383 `rating` tag). */
+export interface MakerRating {
+  /** Number of received reviews. */
+  total_reviews: number;
+  /** Weighted rating sum (first vote is weighted 1/2). Average = total_rating / total_reviews. */
+  total_rating: number;
+  /** Days the maker has been operating. */
+  days: number;
+}
+
 /** Compact, wire-friendly view of an order. */
 export interface SmallOrder {
   id: string | null;
@@ -73,6 +83,8 @@ export interface SmallOrder {
   buyer_invoice: string | null;
   created_at: number | null;
   expires_at: number | null;
+  /** Maker reputation, present only on orderbook events. */
+  rating?: MakerRating | null;
 }
 
 export function newSmallOrder(params: {
@@ -91,6 +103,7 @@ export function newSmallOrder(params: {
   buyer_invoice?: string | null;
   created_at?: number | null;
   expires_at?: number | null;
+  rating?: MakerRating | null;
 }): SmallOrder {
   return {
     id: params.id ?? null,
@@ -108,6 +121,7 @@ export function newSmallOrder(params: {
     buyer_invoice: params.buyer_invoice ?? null,
     created_at: params.created_at ?? null,
     expires_at: params.expires_at ?? null,
+    rating: params.rating ?? null,
   };
 }
 

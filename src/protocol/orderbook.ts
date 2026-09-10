@@ -6,12 +6,38 @@
 import { SimplePool } from "nostr-tools/pool";
 import { kindFromString } from "./kind.js";
 import { statusFromString } from "./status.js";
-import type { SmallOrder, Kind, Status } from "./order.js";
+import type { SmallOrder, Kind, Status, MakerRating } from "./order.js";
 import { NOSTR_ORDER_EVENT_KIND } from "./constants.js";
 import { FETCH_EVENTS_TIMEOUT_MS } from "./dmRouter.js";
 
 /** Relay fetch cap for Mostro order/dispute list snapshots (mostrix). */
 export const MOSTRO_LIST_FETCH_EVENT_LIMIT = 500;
+
+/**
+ * Parse a maker `rating` tag value into a `MakerRating`.
+ *
+ * Mostro serializes it as `["rating",{"total_reviews":N,"total_rating":F,"days":N}]`
+ * (a JSON array) or `"{}"` when the maker has no reputation yet.
+ */
+export function parseMakerRating(raw: string): MakerRating | null {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    const data = Array.isArray(parsed) ? parsed[1] : parsed;
+    if (data && typeof data === "object") {
+      const obj = data as Record<string, unknown>;
+      if (typeof obj.total_reviews === "number" || typeof obj.total_rating === "number") {
+        return {
+          total_reviews: Number(obj.total_reviews) || 0,
+          total_rating: Number(obj.total_rating) || 0,
+          days: Number(obj.days) || 0,
+        };
+      }
+    }
+  } catch {
+    // fall through
+  }
+  return null;
+}
 
 /** Build a SmallOrder from the tags of a kind-38383 event. */
 export function orderFromTags(tags: string[][]): SmallOrder {
@@ -75,6 +101,13 @@ export function orderFromTags(tags: string[][]): SmallOrder {
       case "premium":
         order.premium = parseIntSafe(v) ?? 0;
         break;
+      case "rating": {
+        const rating = parseMakerRating(v);
+        if (rating) {
+          order.rating = rating;
+        }
+        break;
+      }
       default:
         break;
     }

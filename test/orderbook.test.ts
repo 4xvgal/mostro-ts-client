@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   orderFromTags,
+  parseMakerRating,
   aggregateLatestOrdersById,
   parseOrdersEvents,
   pendingOrdersForBook,
@@ -53,6 +54,28 @@ test("orderFromTags handles range fa tag (min:max)", () => {
 test("orderFromTags ignores decimal fa values", () => {
   const order = orderFromTags(orderEvent("o3", 100, [["fa", "100.50"]]).tags);
   assert.equal(order.fiat_amount, 0);
+});
+
+test("parseMakerRating parses the mostro rating tag", () => {
+  const r = parseMakerRating('["rating",{"total_reviews":3,"total_rating":10.5,"days":12}]');
+  assert.deepEqual(r, { total_reviews: 3, total_rating: 10.5, days: 12 });
+});
+
+test("parseMakerRating returns null for empty reputation", () => {
+  assert.equal(parseMakerRating("{}"), null);
+  assert.equal(parseMakerRating("garbage"), null);
+});
+
+test("orderFromTags parses the rating tag", () => {
+  const order = orderFromTags(
+    orderEvent("o4", 100, [["rating", '["rating",{"total_reviews":1,"total_rating":2,"days":0}]']]).tags,
+  );
+  assert.deepEqual(order.rating, { total_reviews: 1, total_rating: 2, days: 0 });
+});
+
+test("orderFromTags leaves rating unset when absent", () => {
+  const order = orderFromTags(orderEvent("o5", 100).tags);
+  assert.equal(order.rating, undefined);
 });
 
 test("aggregateLatestOrdersById keeps newest per id", () => {
