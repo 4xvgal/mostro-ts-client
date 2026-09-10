@@ -5,11 +5,12 @@
 // Keys: Tab/Shift+Tab switch, ↑↓ select, Enter act, Esc back, q quit.
 
 import blessed from "blessed";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, readFileSync } from "node:fs";
 import {
   MostroClient,
   generateMnemonic,
   deriveTradeKeys,
+  parseChatAttachment,
   type SmallOrder,
   type Message,
 } from "../src/protocol/index.js";
@@ -38,7 +39,14 @@ async function main() {
     mnemonic = user?.mnemonic ?? generateMnemonic();
   }
 
-  const client = new MostroClient({ mnemonic, mostroPubkey, relays: RELAYS, store });
+  const blossomServers = process.env.MOSTRO_BLOSSOM?.split(",").map((s) => s.trim()).filter(Boolean);
+  const client = new MostroClient({
+    mnemonic,
+    mostroPubkey,
+    relays: RELAYS,
+    store,
+    ...(blossomServers && blossomServers.length > 0 ? { blossomServers } : {}),
+  });
   await client.start();
   if (!(await store.getUser())) {
     await store.upsertUser({
@@ -727,7 +735,9 @@ async function main() {
               const mine = m.sender === myTradePub;
               const who = mine ? "{green-fg}(me){/}" : `{yellow-fg}(${peerLabel}){/}`;
               const time = new Date(m.created_at * 1000).toISOString().slice(11, 19);
-              return `{cyan-fg}(${time}){/} ${who} ${m.content}`;
+              const att = parseChatAttachment(m.content);
+              const content = att ? `{magenta-fg}📎 ${att.type === "image_encrypted" ? "image" : "file"}: ${att.filename}{/}` : m.content;
+              return `{cyan-fg}(${time}){/} ${who} ${content}`;
             })
             .join("\n")
         : "(no messages — type below, Enter sends, Esc closes)";
@@ -747,8 +757,34 @@ async function main() {
           return;
         }
         input.clearValue();
-        const send = mode === "peer" ? client.sendOrderChat(orderId, text) : client.sendDisputeChat(orderId, text);
-        send
+        let send: Promise<unknown>;
+        if (mode === "peer" && text.startsWith("/file ")) {
+          const path = text.slice(6).trim();
+          try {
+            const data = readFileSync(path);
+            send = client
+              .sendOrderChatAttachment(orderId, { filename: path.split("/").pop() ?? "attachment", data })
+              .then((url) => log(`attachment uploaded: ${url}`));
+          } catch (e) {
+            send = Promise.reject(e);
+          }
+        } else if (mode === "peer" && text.startsWith("/save ")) {
+          const out = text.slice(6).trim();
+          const att = client
+            .getOrderChat(orderId)
+            .map((m) => parseChatAttachment(m.content))
+            .filter((a): a is NonNullable<typeof a> => a !== null)
+            .pop();
+          send = att
+            ? client.downloadOrderChatAttachment(orderId, att).then((data) => {
+                writeFileSync(out, data);
+                log(`attachment saved: ${out} (${data.length} bytes)`);
+              })
+            : Promise.reject(new Error("no attachment in this chat"));
+        } else {
+          send = mode === "peer" ? client.sendOrderChat(orderId, text) : client.sendDisputeChat(orderId, text);
+        }
+        Promise.resolve(send)
           .then(() => renderChat())
           .catch((e: Error) => log(`chat failed: ${e.message}`))
           .finally(() => read());

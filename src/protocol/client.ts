@@ -13,7 +13,17 @@ import { deriveIdentityKeys } from "./keys.js";
 import type { Store, UserRow } from "./store.js";
 import { DmRouter, sendDm, FETCH_EVENTS_TIMEOUT_MS } from "./dmRouter.js";
 import { unwrapMessageNip44, pubkeyFromSecret } from "./transport.js";
-import { deriveChatKeys } from "./chatKeys.js";
+import { deriveChatKeys, generateSharedKey } from "./chatKeys.js";
+import {
+  encryptBlob,
+  decryptBlob,
+  validateAttachment,
+  uploadBlob,
+  downloadBlob,
+  DEFAULT_BLOSSOM_SERVERS,
+} from "./blossom.js";
+import type { ChatAttachment } from "./blossom.js";
+import { hex } from "@scure/base";
 import { wrapChatMessage, unwrapChatMessage } from "./chat.js";
 import type { ChatMessage } from "./chat.js";
 import { fetchPublicOrderBook } from "./orderbook.js";
@@ -38,6 +48,8 @@ export interface MostroClientOptions {
   store: Store;
   /** Fiat currency filter for the order book (empty = all). */
   currencies?: string[];
+  /** Blossom servers for encrypted chat attachments (defaults to the built-in list). */
+  blossomServers?: readonly string[];
 }
 
 /** Minimal reactive-store binding the client pushes into (see react/store.ts). */
@@ -516,6 +528,57 @@ export class MostroClient {
   /** Whether the counterpart trade key is known yet (peer chat available). */
   async canOrderChat(orderId: string): Promise<boolean> {
     return (await this.peerTradeKeys(orderId)) !== null;
+  }
+
+  /**
+   * Encrypt a file with the order chat shared key, upload it to Blossom, and
+   * send an attachment JSON message over the peer chat. Returns the Blossom URL.
+   */
+  async sendOrderChatAttachment(
+    orderId: string,
+    input: { filename: string; mimeType?: string; data: Uint8Array },
+  ): Promise<string> {
+    const peer = await this.peerTradeKeys(orderId);
+    if (!peer) {
+      throw new Error(`no counterpart trade key known yet for order ${orderId}`);
+    }
+    const mime = input.mimeType ?? "application/octet-stream";
+    const invalid = validateAttachment(input.data, input.filename);
+    if (invalid) {
+      throw new Error(invalid);
+    }
+    const shared = generateSharedKey(peer.secret, peer.pubkey);
+    const encrypted = encryptBlob(shared, input.data);
+    const servers = this.opts.blossomServers ?? DEFAULT_BLOSSOM_SERVERS;
+    const url = await uploadBlob({
+      servers,
+      blob: encrypted,
+      tradeSecretHex: peer.secret,
+      filename: input.filename,
+      mimeType: mime,
+    });
+    const json = JSON.stringify({
+      type: mime.startsWith("image/") ? "image_encrypted" : "file_encrypted",
+      blossom_url: url,
+      nonce: hex.encode(encrypted.subarray(0, 12)),
+      filename: input.filename,
+      mime_type: mime,
+      original_size: input.data.length,
+      encrypted_size: encrypted.length,
+    });
+    await this.sendOrderChat(orderId, json);
+    return url;
+  }
+
+  /** Download + decrypt a received order chat attachment. */
+  async downloadOrderChatAttachment(orderId: string, attachment: ChatAttachment): Promise<Uint8Array> {
+    const peer = await this.peerTradeKeys(orderId);
+    if (!peer) {
+      throw new Error(`no counterpart trade key known yet for order ${orderId}`);
+    }
+    const shared = generateSharedKey(peer.secret, peer.pubkey);
+    const blob = await downloadBlob(attachment.blossom_url);
+    return decryptBlob(shared, blob);
   }
 
   /** Subscribe the user↔user chat conversation for an order, once the peer is known. */

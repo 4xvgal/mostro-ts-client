@@ -116,4 +116,101 @@ export function signAuthEvent(template: EventTemplate, tradeSecretHex: string) {
   return finalizeEvent(template, hex.decode(tradeSecretHex));
 }
 
+/** Default Blossom servers (mostrix `DEFAULT_BLOSSOM_SERVERS`). */
+export const DEFAULT_BLOSSOM_SERVERS = [
+  "https://blossom.primal.net",
+  "https://blossom.band",
+  "https://nostr.media",
+  "https://blossom.sector01.com",
+  "https://24242.io",
+  "https://otherstuff.shaving.kiwi",
+  "https://blossom.f7z.io",
+  "https://nosto.re",
+  "https://blossom.poster.place",
+] as const;
+
+/** Parsed Mostro Mobile attachment message (`image_encrypted` / `file_encrypted`). */
+export interface ChatAttachment {
+  type: "image_encrypted" | "file_encrypted";
+  blossom_url: string;
+  filename: string;
+  mime_type: string | null;
+  nonce: string | null;
+  original_size: number | null;
+  encrypted_size: number | null;
+}
+
+/** Parse a chat message body as an attachment JSON; null when it is plain text. */
+export function parseChatAttachment(content: string): ChatAttachment | null {
+  const trimmed = content.trim();
+  if (!trimmed.startsWith("{")) return null;
+  try {
+    const obj = JSON.parse(trimmed) as Record<string, unknown>;
+    if (obj.type !== "image_encrypted" && obj.type !== "file_encrypted") return null;
+    const url = typeof obj.blossom_url === "string" ? obj.blossom_url.trim() : "";
+    if (!url) return null;
+    return {
+      type: obj.type,
+      blossom_url: url,
+      filename: typeof obj.filename === "string" ? obj.filename : "attachment",
+      mime_type: typeof obj.mime_type === "string" ? obj.mime_type : null,
+      nonce: typeof obj.nonce === "string" ? obj.nonce : null,
+      original_size: typeof obj.original_size === "number" ? obj.original_size : null,
+      encrypted_size: typeof obj.encrypted_size === "number" ? obj.encrypted_size : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Upload an encrypted blob to a Blossom server; returns `{base}/{sha256}`. */
+export async function uploadBlob(params: {
+  servers: readonly string[];
+  blob: Uint8Array;
+  tradeSecretHex: string;
+  filename: string;
+  mimeType: string;
+}): Promise<string> {
+  const { servers, blob, tradeSecretHex, filename, mimeType } = params;
+  const hash = sha256Hex(blob);
+  const signed = signAuthEvent(
+    buildUploadAuthEvent({ tradeSecretHex, blob, filename, mimeType }).event,
+    tradeSecretHex,
+  );
+  const auth = `Nostr ${btoa(JSON.stringify(signed))}`;
+  let lastErr: Error | null = null;
+  for (const raw of servers) {
+    const base = raw.trim().replace(/\/+$/, "");
+    if (!base) continue;
+    try {
+      const res = await fetch(`${base}/upload`, {
+        method: "PUT",
+        headers: {
+          Authorization: auth,
+          "Content-Type": "application/octet-stream",
+          "User-Agent": "mostro-ts-client",
+        },
+        body: blob as unknown as BodyInit,
+      });
+      if (!res.ok) {
+        lastErr = new Error(`Blossom upload returned ${res.status}`);
+        continue;
+      }
+      return `${base}/${hash}`;
+    } catch (e) {
+      lastErr = e as Error;
+    }
+  }
+  throw lastErr ?? new Error("no Blossom server accepted the upload");
+}
+
+/** Download a blob from an HTTP(S) URL. */
+export async function downloadBlob(url: string): Promise<Uint8Array> {
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Blossom download returned ${res.status}`);
+  }
+  return new Uint8Array(await res.arrayBuffer());
+}
+
 export { randomBytes, sha256, hex };

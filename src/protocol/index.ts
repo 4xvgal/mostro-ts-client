@@ -208,9 +208,14 @@ export {
   validateAttachment,
   buildUploadAuthEvent,
   signAuthEvent,
+  parseChatAttachment,
+  uploadBlob,
+  downloadBlob,
   MAX_ATTACHMENT_BYTES,
   ALLOWED_ATTACHMENT_EXTENSIONS,
+  DEFAULT_BLOSSOM_SERVERS,
 } from "./blossom.js";
+export type { ChatAttachment } from "./blossom.js";
 
 export {
   MOSTRO_LIST_FETCH_EVENT_LIMIT,

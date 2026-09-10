@@ -9,6 +9,8 @@ import {
   validateAttachment,
   buildUploadAuthEvent,
   signAuthEvent,
+  parseChatAttachment,
+  generateSharedKey,
   deriveTradeKeys,
   MAX_ATTACHMENT_BYTES,
 } from "../src/protocol/index.js";
@@ -83,4 +85,42 @@ test("upload auth event structure", () => {
 
   const signed = signAuthEvent(event, trade.secret);
   assert.equal(signed.pubkey, trade.pubkey);
+});
+test("parseChatAttachment reads the mostro mobile schema", () => {
+  const json = JSON.stringify({
+    type: "image_encrypted",
+    blossom_url: "https://blossom.primal.net/abc",
+    nonce: "00112233445566778899aabb",
+    filename: "pic.png",
+    mime_type: "image/png",
+    original_size: 1234,
+    encrypted_size: 1262,
+  });
+  const att = parseChatAttachment(json);
+  assert.equal(att?.type, "image_encrypted");
+  assert.equal(att?.filename, "pic.png");
+  assert.equal(att?.blossom_url, "https://blossom.primal.net/abc");
+  assert.equal(parseChatAttachment("just text"), null);
+  assert.equal(parseChatAttachment('{"type":"other"}'), null);
+});
+
+test("attachment encrypt/decrypt via the order chat shared key", () => {
+  const a = deriveTradeKeys(MNEMONIC, 1);
+  const b = deriveTradeKeys(MNEMONIC, 2);
+  const sharedA = generateSharedKey(a.secret, b.pubkey);
+  const sharedB = generateSharedKey(b.secret, a.pubkey);
+  assert.equal(Buffer.from(sharedA).toString("hex"), Buffer.from(sharedB).toString("hex"));
+
+  const data = new TextEncoder().encode("secret file bytes");
+  const blob = encryptBlob(sharedA, data);
+  const json = JSON.stringify({
+    type: "file_encrypted",
+    blossom_url: "https://example.com/x",
+    nonce: Buffer.from(blob.subarray(0, 12)).toString("hex"),
+    filename: "doc.pdf",
+  });
+  const att = parseChatAttachment(json)!;
+  assert.equal(att.filename, "doc.pdf");
+  const decrypted = decryptBlob(sharedB, blob);
+  assert.equal(new TextDecoder().decode(decrypted), "secret file bytes");
 });
