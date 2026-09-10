@@ -234,6 +234,12 @@ export function createSqliteStore(open: (path: string) => SqlDatabase): (path?: 
         return rows as unknown as import("./store.js").ChatMessageRow[];
       },
 
+      async wipe(): Promise<void> {
+        db.exec(
+          "DELETE FROM chat_messages; DELETE FROM orders; DELETE FROM admin_disputes; DELETE FROM users;",
+        );
+      },
+
       async close(): Promise<void> {
         db.close();
       },

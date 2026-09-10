@@ -874,6 +874,22 @@ async function main() {
   screen.key(["q", "C-c"], () => {
     client.stop().finally(() => process.exit(0));
   });
+  // Factory reset: wipe local session data (restart to reset the running state).
+  screen.key(["S-w"], () => {
+    if (confirmActive || actionPopup || invoicePrompt) return;
+    showConfirm("Wipe ALL local session data (orders, chats)?", () => {
+      store
+        .wipe()
+        .then(() => {
+          log("session wiped — restart the TUI to reset in-memory state");
+          orders.length = 0;
+          tradesList = [];
+          renderBook(orders);
+          renderTrades();
+        })
+        .catch((e: Error) => log(`wipe failed: ${e.message}`));
+    });
+  });
   screen.key(["tab", "C-i"], () => {
     if (actionPopup) closeActionPopup();
     showTab(tabs[(tabs.indexOf(activeTab) + 1) % tabs.length]!);

@@ -135,5 +135,30 @@ export function storageContract(runner: Runner, open: () => Store): void {
     await store.close();
   });
 
+  test("wipe clears all session data", async () => {
+    const store = open();
+    await store.upsertUser({
+      i0_pubkey: "pk",
+      mnemonic: "m",
+      last_trade_index: 3,
+      created_at: 1,
+    });
+    await store.saveOrder(baseOrder("o"));
+    await store.saveChatMessage({
+      outer_event_id: "e1",
+      order_id: "o",
+      scope: "order",
+      sender: "s",
+      content: "hi",
+      created_at: 1,
+      inner_event_id: "i1",
+    });
+    await store.wipe();
+    assert.equal(await store.getUser(), null);
+    assert.equal(await store.getOrder("o"), null);
+    assert.deepEqual(await store.getChatMessages("o", "order"), []);
+    await store.close();
+  });
+
   void assert;
 }

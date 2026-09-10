@@ -250,5 +250,12 @@ export function openIndexedDbStore(opts: { dbName?: string } = {}): Store {
         .filter((m) => m.order_id === orderId && m.scope === scope)
         .sort((a, b) => a.created_at - b.created_at);
     },
+
+    async wipe(): Promise<void> {
+      const database = await db();
+      for (const store of [STORE_CHAT, STORE_ORDERS, STORE_DISPUTES, STORE_USERS]) {
+        await txn(database, store, "readwrite", (s) => s.clear());
+      }
+    },
   };
 }

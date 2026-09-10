@@ -149,5 +149,8 @@ export interface Store {
   /** Chat messages for an order + scope, oldest first. */
   getChatMessages(orderId: string, scope: string): Promise<ChatMessageRow[]>;
 
+  /** Factory reset: clear all local session data (users, orders, disputes, chat). */
+  wipe(): Promise<void>;
+
   close(): Promise<void>;
 }
