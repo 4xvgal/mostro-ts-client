@@ -1,5 +1,11 @@
 # mostro-ts-client
 
+## 0.2.0-rc.2
+
+### Patch Changes
+
+- f201e61: feat:adding PPR social graph feature
+
 ## 0.2.0-rc.1
 
 ### Minor Changes
