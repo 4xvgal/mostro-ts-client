@@ -127,7 +127,9 @@ services:
   mostro:
     # Official prebuilt image (linux/amd64 + linux/arm64). Use `--build` with
     # a local mostro checkout instead if you need to patch the daemon.
-    image: mostrop2p/mostro:latest
+    # Digest-pinned v0.18.7 (mostro-core 0.14.6, the version behind spec §16).
+    # latest == v0.18.7 today; digest pin keeps fa/created_at/pm behaviour frozen.
+    image: mostrop2p/mostro@sha256:bff406d11fc90436c9f7da5186f5976a63ae7ee1d711a6636d36205421cbda31
     container_name: mostro-regtest-daemon
     depends_on:
       lnd-alice:

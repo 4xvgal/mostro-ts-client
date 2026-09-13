@@ -13,6 +13,9 @@ dist/
 
 # Regtest runtime artifacts (daemon DB, LND data)
 docker/regtest/config/mostro.db*
+
+# Trust-graph extension scratch output
+extension/tg/out/
 # TUI runtime (per-instance stores + hold invoice dumps)
 /tui/*.db*
 /tui/hold-invoice.txt
