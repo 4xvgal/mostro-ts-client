@@ -42,6 +42,9 @@ export interface MostroUIState {
 
 export interface MostroStore {
   state: MostroUIState;
+  /** Vanilla store access (zustand duck-type) so React/Vue/Svelte can subscribe. */
+  getState: () => MostroUIState;
+  subscribe: (listener: (state: MostroUIState, prevState: MostroUIState) => void) => () => void;
   /** Connect a client: bind its callbacks into this store. */
   connect: (client: MostroClient) => void;
   disconnect: () => void;
@@ -75,6 +78,8 @@ export function createMostroStore(): MostroStore {
     get state() {
       return store.getState();
     },
+    getState: () => store.getState(),
+    subscribe: (listener) => store.subscribe(listener),
     connect(client: MostroClient) {
       store.setState({ status: "connecting" });
       // Bind the client's reactive sink into this store.
